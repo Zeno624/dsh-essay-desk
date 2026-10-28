@@ -34,6 +34,30 @@ const DEFAULT_PRACTICE_TIME = '09:00'
 const PRACTICE_TYPES = ['场景+冲突', '情绪', '关系', '场景']
 const PRACTICE_STATUS_LABELS = { pending: '待写', written: '已写', submitted: '已交', scored: '已评' }
 const PRACTICE_CHECK_INTERVAL = 60 * 1000
+// 第三人称统一 ta：下面这些词里的「他」不是人称代词，先占位保护、最后原样还原
+const PROTECTED_HE_WORDS = [
+  '其他',
+  '吉他',
+  '他乡',
+  '他日',
+  '他处',
+  '他国',
+  '他方',
+  '他者',
+  '他物',
+  '他人',
+  '他杀',
+  '他律',
+  '利他',
+  '排他',
+  '无他',
+]
+// 出题时从 practice.keywords 里过滤掉的性少数题材词（大小写不敏感）
+const BANNED_KEYWORD_PATTERN = /同性恋|同性愛|同性婚姻|同妻|同婚|出柜|跨性别|酷儿|lgbtq?|gay|lesbian|queer|transgender|homosexual/i
+// 每期任务固定写入「约束」的写作约定。故意用「性少数 / 非异性恋」而非被禁词本身，
+// 保证任务正文（含约束）不出现 BANNED_KEYWORD_PATTERN 里的词。
+const PRACTICE_CONVENTIONS =
+  '写作约定：角色不标注性别，第三人称统一用 ta；本期主视角见上；不写性少数 / 非异性恋关系题材；角色可用社会身份（职业/身份）设定，不必依赖性别关系。'
 const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 // birthtime 比「现在」晚超过这个量时视为不可信（见 fileTimes）
@@ -539,7 +563,7 @@ export function listState(root = resolveRoot()) {
 // 每道题都是完整命题：命题 / 剧本节拍（4–6 条）/ 演绎方向 / 约束 / 反馈标准。
 // types 可含多个题型；生成时按日期日序轮换题型（PRACTICE_TYPES），在匹配题目里挑选，
 // 并优先避开最近 3 期用过的 motif。
-const QUESTION_LIBRARY = [
+export const QUESTION_LIBRARY = [
   {
     id: 'q01',
     type: '场景+冲突',
@@ -553,7 +577,7 @@ const QUESTION_LIBRARY = [
     prompt: '深夜的末班地铁上，你捡到一张照片，照片里的人是你，可你完全不记得拍过它。',
     beats: [
       '末班车厢只剩三排乘客，你低头捡起脚边那张照片，画面里是你站在同样的车厢里。',
-      '对面的女人抬头看了你一眼又迅速移开视线，她的手机壳和照片背面的标记一模一样。',
+      '对面的乘客抬头看了你一眼又迅速移开视线，她的手机壳和照片背面的标记一模一样。',
       '你攥着照片走过去，她先开口：「你终于来还了。」',
       '她说照片是三天前你亲手交给她的，可你连三天前坐过这班车都不记得。',
       '到站提示音响起，你必须决定：是下车去查监控，还是留下听完她的解释。',
@@ -677,7 +701,7 @@ const QUESTION_LIBRARY = [
     prompt: '雨天公交站，有人踩了你一脚，骂完你才反应过来：刚才说对不起的是你自己。',
     beats: [
       '雨斜着下，站台上的人都缩着肩，你的鞋全湿了。',
-      '一个男人挤过来踩在你脚背上，回头先骂：「站这儿挡什么道？」',
+      '一个陌生人挤过来踩在你脚背上，回头先骂：「站这儿挡什么道？」',
       '你下意识说了句「不好意思」，说完才觉得不对。',
       '他还在嘟囔，你攥紧伞柄，指节发白，公交车的灯从雨里靠近。',
       '上车只有几秒，你要么挤上去，要么站在原地把话说完。',
@@ -912,6 +936,131 @@ const QUESTION_LIBRARY = [
       '哪句解释可以删',
     ],
   },
+  // ---- 社会身份题（角色用职业/身份指称，不依赖性别关系） ----
+  {
+    id: 'q13',
+    type: '场景+冲突',
+    types: ['场景+冲突', '关系'],
+    title: '代驾的第一单，乘客不肯说目的地',
+    motif: '职业与信任',
+    scene: '凌晨的停车场出口',
+    conflict: '代驾司机接到的乘客喝多了，只说往前开，不肯说地址',
+    emotion: '耐心 → 警觉 → 为难',
+    tags: ['代驾', '乘客', '深夜', '职业'],
+    prompt: '凌晨的停车场出口，你是代驾司机，接到的乘客上了车只说「往前开」，却不肯说目的地。',
+    beats: [
+      '你在停车场出口等到第三批人，一个乘客拉开车门坐进后排，身上全是酒气。',
+      '你问地址，乘客说：「往前开，到该拐的地方我告诉你。」',
+      '开出两条街，导航一直空着，后排传来压抑的呼吸声。',
+      '后视镜里，乘客攥着手机，屏幕上是一个没有拨出去的电话号码。',
+      '前面路口在查酒驾，乘客忽然说：「别停，绕过去。」',
+    ],
+    directions: {
+      view: '第一人称（司机视角），用后视镜和空着的导航制造张力',
+      tension: '乘客到底要去哪、在躲谁',
+      ending: '让「职业与信任」落在一个有代价的选择上：按规矩停车，还是照乘客说的绕路',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（耐心 → 警觉 → 必须表态）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「职业与信任」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q14',
+    type: '关系',
+    types: ['关系', '情绪'],
+    title: '夜班巡房，家属把我堵在走廊',
+    motif: '照护与信任',
+    scene: '医院住院部夜班走廊',
+    conflict: '家属怀疑夜班护工没有照顾好病人',
+    emotion: '委屈 → 克制 → 理解',
+    tags: ['护工', '家属', '医院', '夜班'],
+    prompt: '住院部夜班走廊，你是夜班护工，一位家属把你堵在墙边，质问病人为什么又疼了。',
+    beats: [
+      '凌晨两点半，走廊只亮着应急灯，你刚给三床翻完身。',
+      '家属从陪护椅上站起来，挡在你面前：「白天还好好的，怎么到你这儿就疼得睡不着？」',
+      '你解释止疼药有间隔时间，家属把病历本拍在护士台上：「我看不懂这些。」',
+      '三床在病房里喊了一声，你们都停住，同时看向门口。',
+      '值班医生还没到，家属盯着你，等你给个说法。',
+    ],
+    directions: {
+      view: '第一人称（护工视角），用身体的疲惫写情绪',
+      tension: '被误解时是解释、顶回去，还是先处理病人',
+      ending: '让「信任」不是一次性和解，而是一个具体的让步',
+    },
+    constraints: '600–1500 字；第一人称；对话要自然；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（委屈 → 克制 → 理解）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「照护与信任」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q15',
+    type: '关系',
+    types: ['关系'],
+    title: '交租日，租客发来一段很长的语音',
+    motif: '契约与人情',
+    scene: '出租屋楼下的旧沙发',
+    conflict: '租客想缓交房租，房东自己也在等这笔钱',
+    emotion: '为难 → 计较 → 松动',
+    tags: ['房东', '租客', '房租', '合同'],
+    prompt: '交租日晚上，你是房东，租客发来一段三分钟的语音，说这个月想缓一缓。',
+    beats: [
+      '你坐在出租屋楼下的旧沙发上，手机里是那段三分钟的语音。',
+      '语音里租客说公司拖了工资，能不能月底再补，声音越说越低。',
+      '你算着这个月的房贷，手指在计算器上按了两遍。',
+      '楼上传来搬东西的动静，你不知道那是收拾行李还是刚下班。',
+      '月底只剩三天，你需要决定怎么回这条消息。',
+    ],
+    directions: {
+      view: '第一人称（房东视角），把「算钱」和「算人情」并排写',
+      tension: '按合同收租，还是松口缓一缓',
+      ending: '让松动或坚持都带来具体后果：一个数字、一顿饭，或者一段沉默',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（为难 → 计较 → 松动）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「契约与人情」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q16',
+    type: '场景',
+    types: ['场景', '关系'],
+    title: '超时两分钟，我被拦在小区门口',
+    motif: '规则与体谅',
+    scene: '老小区的铁门岗亭',
+    conflict: '外卖快超时，保安按规矩要登记还要等业主确认',
+    emotion: '焦急 → 争辩 → 妥协',
+    tags: ['外卖', '保安', '小区', '超时'],
+    prompt: '老小区的铁门岗亭前，订单还剩两分钟超时，保安说没有业主确认不能进。',
+    beats: [
+      '电动车在铁门前刹住，手机上的倒计时只剩两分钟。',
+      '保安从岗亭里探出头：「登记，打电话让业主下来接。」',
+      '你指着订单说楼上等着吃饭，保安指了指墙上的规定：「上周刚出过事。」',
+      '业主的电话占线，倒计时跳到零，系统提示预计扣款。',
+      '铁门开了一条缝，保安看着你，等你先动。',
+    ],
+    directions: {
+      view: '第一人称（骑手视角），用倒计时和铁门的重量控制节奏',
+      tension: '闯进去还是等下去，两边都有代价',
+      ending: '让「体谅」不是口号：一个让路、一句解释，或者一次真的扣款',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（焦急 → 争辩 → 妥协）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「规则与体谅」',
+      '哪句解释可以删',
+    ],
+  },
 ]
 
 // ---------------- 写作练习：任务文件 ----------------
@@ -1000,6 +1149,7 @@ function renderPracticeFile({ front, issue, sections }) {
     `date: ${front.date}`,
     `title: ${front.title}`,
     `type: ${front.type}`,
+    `pov: ${front.pov}`,
     `motif: ${front.motif}`,
     `keywords:${front.keywords ? ` ${front.keywords}` : ''}`,
     `status: ${front.status}`,
@@ -1094,6 +1244,32 @@ function parseKeywords(value) {
   return [...new Set(list)].slice(0, 12)
 }
 
+/**
+ * 第三人称统一为 ta：`他们/她们 → ta们`，其余 `他 / 她 → ta`。
+ * 「其他、吉他、他乡…」里的「他」不是人称代词：先替换成占位符，最后原样还原。
+ */
+export function neutralizePronouns(text) {
+  let out = String(text ?? '')
+  const placeholders = []
+  for (const word of PROTECTED_HE_WORDS) {
+    if (!out.includes(word)) continue
+    const token = `\u0001${placeholders.length}\u0001`
+    out = out.split(word).join(token)
+    placeholders.push(word)
+  }
+  out = out.replace(/他们/g, 'ta们').replace(/她们/g, 'ta们').replace(/他/g, 'ta').replace(/她/g, 'ta')
+  for (let i = 0; i < placeholders.length; i += 1) {
+    out = out.split(`\u0001${i}\u0001`).join(placeholders[i])
+  }
+  return out
+}
+
+/** 过滤 practice.keywords 里的性少数题材词（大小写不敏感），返回逗号分隔的字符串 */
+export function sanitizeKeywords(value) {
+  const list = parseKeywords(value).filter((keyword) => !BANNED_KEYWORD_PATTERN.test(keyword))
+  return list.join(', ')
+}
+
 function keywordHits(question, keywordList) {
   return keywordList.some((keyword) => question.tags.some((tag) => tag.includes(keyword) || keyword.includes(tag)))
 }
@@ -1161,18 +1337,28 @@ export function generatePracticeTask(root = resolveRoot(), { date, keywords } = 
   if (existsSync(file)) return readPracticeTask(base, id)
 
   const config = readPracticeConfig()
-  const keywordList = parseKeywords(keywords === undefined ? config.keywords : keywords)
+  // 先过滤关键词里的性少数题材词，再用剩下的词匹配/注入题目
+  const keywordList = parseKeywords(sanitizeKeywords(keywords === undefined ? config.keywords : keywords))
   const tasks = listPracticeTasks(base)
   const question = pickQuestion({ day, tasks, keywordList })
+  // 当日轮换题型；关键词跨题型命中时退回题目自己的主类型，保证 front matter 的 type 与题目一致
+  const targetType = PRACTICE_TYPES[dayNumber(day) % PRACTICE_TYPES.length]
+  // 每期随机预设主视角性别（只影响叙事视角，不代表作者性别）
+  const pov = Math.random() < 0.5 ? '男' : '女'
+  const povLabel = pov === '男' ? '男性视角' : '女性视角'
+  const neutral = (text) => neutralizePronouns(text)
+  const title = neutral(question.title)
   const sections = [
-    ['命题', promptWithKeywords(question, keywordList)],
-    ['剧本节拍', question.beats.map((beat, index) => `${index + 1}. ${beat}`).join('\n')],
+    ['命题', neutral(promptWithKeywords(question, keywordList))],
+    ['剧本节拍', neutral(question.beats.map((beat, index) => `${index + 1}. ${beat}`).join('\n'))],
     [
       '演绎方向',
-      `- 视角：${question.directions.view}\n- 可放大的矛盾：${question.directions.tension}\n- 结尾尝试：${question.directions.ending}`,
+      neutral(
+        `- 视角：${question.directions.view}\n- 可放大的矛盾：${question.directions.tension}\n- 结尾尝试：${question.directions.ending}`,
+      ),
     ],
-    ['约束', question.constraints],
-    ['反馈标准', question.feedback.map((item, index) => `${index + 1}. ${item}`).join('\n')],
+    ['约束', neutral(`${question.constraints}\n本期主视角：第一人称（${povLabel}）。\n${PRACTICE_CONVENTIONS}`)],
+    ['反馈标准', neutral(question.feedback.map((item, index) => `${index + 1}. ${item}`).join('\n'))],
     ['我的演绎', ''],
     ['评语', ''],
     ['积分', '+0（评分后填写）'],
@@ -1181,8 +1367,9 @@ export function generatePracticeTask(root = resolveRoot(), { date, keywords } = 
     front: {
       id,
       date: day,
-      title: question.title,
-      type: PRACTICE_TYPES[dayNumber(day) % PRACTICE_TYPES.length],
+      title,
+      type: question.types.includes(targetType) ? targetType : question.type,
+      pov,
       motif: question.motif,
       keywords: keywordList.join(', '),
       status: 'pending',
@@ -1823,7 +2010,8 @@ function systemPromptText() {
     '',
     '写作练习：',
     '- 练习任务在 练习/任务/<YYYYMMDD>.md（每天到配置的推送时间自动生成），累计积分在 练习/积分.json。',
-    '- 用户说「练习写完了 / 帮我评分」时：先 practice(action=list) 找出 status=submitted 的任务，practice(action=read, id) 通读题目与「我的演绎」，再严格按该任务「反馈标准」的 4 条逐条写评语，然后调用 practice(action=score, id, points, review)。points 传最终积分（基础 10 分 + 0–10 加分，范围 10–20）；review 逐条点评并在最后给一句总体反馈。评分后告诉用户本次得分、当前累计积分，再给一句话反馈。',
+    '- 用户说「练习写完了 / 帮我评分」时：先 practice(action=list) 找出 status=submitted 的任务，practice(action=read, id) 通读题目与「我的演绎」，再严格按该任务「反馈标准」的 4 条逐条写评语，然后调用 practice(action=score, id, points, review)。points 传最终积分（基础 10 分 + 0–10 加分，范围 10–20）；review 逐条点评并在最后给一句总体反馈。评分时用 ta 指代角色，不要使用带性别的称呼；评分后告诉用户本次得分、当前累计积分，再给一句话反馈。',
+    '- 出题约定：题目角色不标注性别，第三人称统一用 ta；每期会随机指定主视角（front matter 的 `pov: 男/女`，并在「约束」里写明「本期主视角：第一人称（男性/女性视角）」），pov 只表示叙事视角、不代表作者性别；角色可以用社会身份（职业/身份）设定，不必依赖性别关系；不写同性恋 / LGBT 等性少数题材，practice.keywords 里的相关词会在生成时被过滤。',
     '- 用户想看练习配置时用 practice(action=config)；要改关键词 / 推送时间 / 开关，引导用户用面板的「练习设置」。',
   ].join('\n')
 }
