@@ -101,6 +101,41 @@ window.__ModuleLoader__.load({
       practiceDirection: '演绎方向',
       practiceConstraints: '约束',
       practiceCriteria: '反馈标准',
+      // 功能入口（左侧两个入口）
+      navEssays: '随笔',
+      navEssaysSub: '写作 · 归档 · 思想脉络',
+      navPractice: '命题演绎',
+      navPracticeSub: '每日命题 · 记录 · 评语',
+      // 命题演绎首页
+      practiceHomeSub: '每天一道命题，写成一段自己的演绎。完成的题目会留下记录与评语。',
+      practiceClaim: '领取今日命题',
+      practiceClaiming: '正在领取…',
+      practiceClaimFailed: '领取命题失败。',
+      practiceOpenToday: '打开今日命题',
+      practiceTodayTitle: '今日命题',
+      practiceNoToday: '今天还没有命题',
+      practiceNoTodayHint: '可以等每日推送，也可以现在领取一道。',
+      practiceSettingsSummary: '每日 {time} 推送',
+      practiceSettingsOff: '每日推送已关闭',
+      practiceStatPoints: '累计积分',
+      practiceStatDone: '已完成',
+      practiceStatStreak: '连续天数',
+      practiceRecords: '任务记录',
+      practiceRecordsCount: '共 {n} 条',
+      practiceRecordsEmpty: '还没有任务记录，领取一道命题开始吧。',
+      practiceDay: '{n} 天',
+      practicePendingReview: '待评分 {n}',
+      settingsButton: '设置',
+      // 设置
+      settingsTitle: '随笔工坊设置',
+      settingsSectionRoot: '文件与目录',
+      settingsRoot: '存放位置',
+      settingsRootHint: '留空恢复默认：工作区目录下的「随笔」文件夹',
+      settingsRootPlaceholder: '/Users/你/随笔',
+      settingsDefaultRootTip: '默认：{root}',
+      settingsSectionPractice: '命题演绎',
+      settingsRootInvalid: '存放位置需要是绝对路径。',
+      settingsSaveFailed: '设置保存失败。',
     };
 
     const en = {
@@ -184,6 +219,38 @@ window.__ModuleLoader__.load({
       practiceDirection: 'Directions',
       practiceConstraints: 'Constraints',
       practiceCriteria: 'Feedback criteria',
+      navEssays: 'Essays',
+      navEssaysSub: 'Write · archive · threads',
+      navPractice: 'Prompt practice',
+      navPracticeSub: 'Daily prompt · records · reviews',
+      practiceHomeSub: 'One prompt a day, one rendition of your own. Finished pieces keep their record and review.',
+      practiceClaim: 'Claim today\'s prompt',
+      practiceClaiming: 'Claiming…',
+      practiceClaimFailed: 'Failed to claim a prompt.',
+      practiceOpenToday: 'Open today\'s prompt',
+      practiceTodayTitle: 'Today\'s prompt',
+      practiceNoToday: 'No prompt for today yet',
+      practiceNoTodayHint: 'Wait for the daily push, or claim one right now.',
+      practiceSettingsSummary: 'Daily at {time}',
+      practiceSettingsOff: 'Daily push is off',
+      practiceStatPoints: 'Total points',
+      practiceStatDone: 'Completed',
+      practiceStatStreak: 'Day streak',
+      practiceRecords: 'Task records',
+      practiceRecordsCount: '{n} in total',
+      practiceRecordsEmpty: 'No records yet. Claim a prompt to begin.',
+      practiceDay: '{n} days',
+      practicePendingReview: 'To review: {n}',
+      settingsButton: 'Settings',
+      settingsTitle: 'Essay Desk settings',
+      settingsSectionRoot: 'Files and folders',
+      settingsRoot: 'Storage location',
+      settingsRootHint: 'Leave empty to use the default “随笔” folder inside your workspace',
+      settingsRootPlaceholder: '/Users/you/essays',
+      settingsDefaultRootTip: 'Default: {root}',
+      settingsSectionPractice: 'Prompt practice',
+      settingsRootInvalid: 'The storage location must be an absolute path.',
+      settingsSaveFailed: 'Failed to save settings.',
     };
 
     // ---------------------------------------------------------------------
@@ -382,6 +449,31 @@ window.__ModuleLoader__.load({
       return null;
     }
 
+    // 本地日期 YYYY-MM-DD（不用 toISOString，避免 UTC 偏移把日期推错）
+    function dateKey(date) {
+      const value = date instanceof Date ? date : new Date();
+      return value.getFullYear() + '-' + pad2(value.getMonth() + 1) + '-' + pad2(value.getDate());
+    }
+
+    // 连续天数：从今天往前数，连续存在已评分任务的天数
+    function practiceStreak(tasks) {
+      const list = Array.isArray(tasks) ? tasks : [];
+      const scored = new Set();
+      for (let index = 0; index < list.length; index += 1) {
+        const task = list[index];
+        if (task && task.status === 'scored') scored.add(String(task.date || ''));
+      }
+      if (!scored.size) return 0;
+      let cursor = new Date();
+      let streak = 0;
+      for (let step = 0; step < 400; step += 1) {
+        if (!scored.has(dateKey(cursor))) break;
+        streak += 1;
+        cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() - 1);
+      }
+      return streak;
+    }
+
     // 兼容 task.sections.{中文键} 与 task.{中文键} 两种返回形态。
     function getPracticeSections(task) {
       if (!task || typeof task !== 'object') return {};
@@ -532,6 +624,70 @@ window.__ModuleLoader__.load({
       '.essay-desk-switch:focus-visible{outline:2px solid var(--ed-accent-line);outline-offset:2px}',
       '.essay-desk-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}',
       '.essay-desk-head-actions{flex-wrap:wrap;justify-content:flex-end}',
+      // 左侧功能入口：随笔 / 命题演绎
+      '.essay-desk-side{width:300px}',
+      '.essay-desk-nav{display:flex;flex-direction:column;gap:6px;padding:12px 4px 2px;flex:none}',
+      '.essay-desk-nav-btn{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;padding:9px 11px;border-radius:12px;border:1px solid transparent;background:transparent;cursor:pointer;color:var(--dsw-alias-label-primary);transition:background .16s ease,border-color .16s ease,transform .16s ease}',
+      '.essay-desk-nav-btn:hover{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1);transform:translateY(-1px)}',
+      '.essay-desk-nav-btn:focus-visible{outline:2px solid var(--ed-accent-line);outline-offset:1px}',
+      '.essay-desk-nav-btn-on{background:var(--ed-accent-soft);border-color:var(--ed-accent-line);box-shadow:inset 3px 0 0 var(--dsw-alias-brand-primary)}',
+      '.essay-desk-nav-btn-on:hover{transform:none;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 20%,transparent)}',
+      '.essay-desk-nav-icon{flex:none;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);transition:background .16s ease,color .16s ease}',
+      '.essay-desk-nav-btn-on .essay-desk-nav-icon{background:var(--ed-accent-soft);color:var(--dsw-alias-brand-primary)}',
+      '.essay-desk-nav-text{display:flex;flex-direction:column;gap:1px;min-width:0}',
+      '.essay-desk-nav-title{font-size:13px;font-weight:600;line-height:18px}',
+      '.essay-desk-nav-sub{font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.essay-desk-nav-divider{height:1px;margin:8px 6px 4px;background:linear-gradient(90deg,transparent,var(--dsw-alias-border-l1),transparent)}',
+      '.essay-desk-side-brief{margin:2px 4px 6px;padding:11px 12px;border:1px solid var(--ed-accent-line);border-radius:12px;background:var(--ed-accent-soft)}',
+      '.essay-desk-side-brief-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-side-brief-row strong{color:var(--dsw-alias-brand-primary);font-weight:650}',
+      '.essay-desk-side-actions{display:flex;gap:6px;margin:9px 4px 2px}',
+      '.essay-desk-side-actions .essay-desk-btn{flex:1;text-align:center;padding:5px 8px}',
+      '.essay-desk-side-records{display:flex;flex-direction:column;gap:5px;padding:0 2px}',
+      '.essay-desk-side-record{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;padding:7px 9px;border-radius:10px;border:1px solid transparent;background:transparent;cursor:pointer;transition:background .16s ease,border-color .16s ease}',
+      '.essay-desk-side-record:hover{background:var(--dsw-alias-bg-layer-1);border-color:var(--dsw-alias-border-l1)}',
+      '.essay-desk-side-record-on{background:var(--ed-accent-soft);border-color:var(--ed-accent-line)}',
+      '.essay-desk-side-record-date{flex:none;font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary);width:38px}',
+      '.essay-desk-side-record-title{flex:1;min-width:0;font-size:12px;line-height:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      // 命题演绎首页
+      '.essay-desk-practice-home{flex:1;min-height:0;overflow-y:auto;padding:2px 0 26px}',
+      '.essay-desk-home-wrap{width:100%;max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:15px}',
+      '.essay-desk-hero{position:relative;overflow:hidden;padding:20px 22px 18px;border-radius:16px;border:1px solid var(--ed-accent-line);background:linear-gradient(135deg,var(--ed-accent-soft),transparent 72%),var(--dsw-alias-bg-layer-1)}',
+      '.essay-desk-hero::after{content:"";position:absolute;right:-46px;top:-52px;width:170px;height:170px;border-radius:50%;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 9%,transparent);pointer-events:none}',
+      '.essay-desk-hero-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}',
+      '.essay-desk-hero-label{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:650;letter-spacing:.09em;color:var(--dsw-alias-brand-primary)}',
+      '.essay-desk-hero-label::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-brand-primary)}',
+      '.essay-desk-hero-title{margin:9px 0 5px;font-size:21px;font-weight:650;line-height:1.35;letter-spacing:-.01em}',
+      '.essay-desk-hero-sub{margin:0;font-size:12.5px;line-height:1.75;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-hero-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px}',
+      '.essay-desk-hero-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px}',
+      '.essay-desk-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}',
+      '.essay-desk-stat{padding:12px 14px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1)}',
+      '.essay-desk-stat-value{font-size:20px;font-weight:650;line-height:1.25;color:var(--dsw-alias-label-primary)}',
+      '.essay-desk-stat-label{margin-top:2px;font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-home-sec{display:flex;flex-direction:column;gap:8px}',
+      '.essay-desk-home-sec-head{display:flex;align-items:center;justify-content:space-between;gap:10px}',
+      '.essay-desk-home-sec-title{font-size:12.5px;font-weight:650;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-home-sec-count{font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-records{display:flex;flex-direction:column;gap:8px}',
+      '.essay-desk-record{display:flex;gap:12px;width:100%;text-align:left;font:inherit;padding:12px 14px;border-radius:12px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);cursor:pointer;transition:background .16s ease,border-color .16s ease,transform .16s ease}',
+      '.essay-desk-record:hover{border-color:var(--ed-accent-line);background:var(--dsw-alias-bg-layer-2);transform:translateY(-1px)}',
+      '.essay-desk-record:focus-visible{outline:2px solid var(--ed-accent-line);outline-offset:1px}',
+      '.essay-desk-record-date{flex:none;width:48px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:6px 0;border-radius:10px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-record-md{font-size:10px;line-height:13px;letter-spacing:.02em}',
+      '.essay-desk-record-day{font-size:15px;font-weight:650;line-height:19px}',
+      '.essay-desk-record-main{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}',
+      '.essay-desk-record-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;line-height:19px}',
+      '.essay-desk-record-title-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.essay-desk-record-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-record-review{margin-top:2px;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+      '.essay-desk-empty-card{padding:22px 18px;border:1px dashed var(--dsw-alias-border-l2);border-radius:14px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.7}',
+      // 设置弹窗
+      '.essay-desk-modal-sec{margin:0 0 14px;padding-top:13px;border-top:1px solid var(--dsw-alias-border-l1)}',
+      '.essay-desk-modal-sec-first{padding-top:0;border-top:none}',
+      '.essay-desk-modal-sec-title{margin-bottom:10px;font-size:11px;font-weight:650;letter-spacing:.07em;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-input-path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px}',
+      '@media (max-width:820px){.essay-desk-side{width:250px}.essay-desk-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}',
     ].join('\n');
 
     // ---------------------------------------------------------------------
@@ -552,8 +708,11 @@ window.__ModuleLoader__.load({
       const [practiceTaskLoading, setPracticeTaskLoading] = useState(false);
       const [practiceView, setPracticeView] = useState(null);
       const [settingsOpen, setSettingsOpen] = useState(false);
-      const [settingsForm, setSettingsForm] = useState({ enabled: true, time: '09:00', keywords: '' });
+      const [settingsForm, setSettingsForm] = useState({ enabled: true, time: '09:00', keywords: '', root: '' });
       const [settingsSaving, setSettingsSaving] = useState(false);
+      // 两个功能入口：随笔 / 命题演绎
+      const [mode, setMode] = useState('essay');
+      const [claiming, setClaiming] = useState(false);
 
       const titleRef = useRef(null);
       const focusTimerRef = useRef(0);
@@ -569,7 +728,7 @@ window.__ModuleLoader__.load({
       const practiceSeqRef = useRef(0);
       const practiceSavingRef = useRef(false);
       const practiceEditVersionRef = useRef(0);
-      const practiceAutoOpenedRef = useRef(false);
+      const claimingRef = useRef(false);
 
       // 把最新值镜像到 ref，供稳定的 useCallback / 定时器读取。
       latestEditorRef.current = editor;
@@ -894,16 +1053,50 @@ window.__ModuleLoader__.load({
         }
       }, [flushIfDirty, flushPracticeIfDirty, t]);
 
+      // 主动领取今日命题：当天已有任务时后端直接返回它，不会覆盖
+      const claimPractice = useCallback(async function () {
+        if (claimingRef.current) return;
+        claimingRef.current = true;
+        setClaiming(true);
+        setError('');
+        try {
+          const data = await call({ op: 'practice.claim' });
+          if (!mountedRef.current) return;
+          if (!data || !data.ok || !data.task || !data.task.id) {
+            setError((data && data.error) || t('practiceClaimFailed'));
+            return;
+          }
+          await refreshPractice();
+          setMode('practice');
+          openPractice(data.task.id, { force: true });
+        } catch (err) {
+          if (mountedRef.current) setError(t('practiceClaimFailed'));
+        } finally {
+          claimingRef.current = false;
+          if (mountedRef.current) setClaiming(false);
+        }
+      }, [openPractice, refreshPractice, t]);
+
+      // 切换左侧功能入口：切走前把未保存内容落盘
+      const switchMode = useCallback(function (next) {
+        if (next !== 'essay' && next !== 'practice') return;
+        if (next === 'essay') flushPracticeIfDirty();
+        else flushIfDirty();
+        setMode(next);
+      }, [flushIfDirty, flushPracticeIfDirty]);
+
       const openSettings = useCallback(function () {
         const config = practice && practice.config ? practice.config : {};
+        const currentRoot = state && typeof state.root === 'string' ? state.root : '';
         setSettingsForm({
           enabled: config.enabled !== false,
           time: typeof config.time === 'string' && config.time ? config.time : '09:00',
           keywords: typeof config.keywords === 'string' ? config.keywords : '',
+          root: currentRoot,
         });
         setError('');
         setSettingsOpen(true);
-      }, [practice]);
+      }, [practice, state]);
 
       const saveSettings = useCallback(async function () {
         if (settingsSaving) return;
@@ -912,18 +1105,24 @@ window.__ModuleLoader__.load({
           setError(t('practiceConfigTimeInvalid'));
           return;
         }
+        const root = String(settingsForm.root || '').trim();
+        if (root && root.charAt(0) !== '/') {
+          setError(t('settingsRootInvalid'));
+          return;
+        }
         setSettingsSaving(true);
         setError('');
         try {
           const data = await call({
-            op: 'practice.config',
+            op: 'config.save',
+            root: root,
             enabled: !!settingsForm.enabled,
             time: time || '09:00',
             keywords: String(settingsForm.keywords || ''),
           });
           if (!mountedRef.current) return;
           if (!data || !data.ok) {
-            setError((data && data.error) || t('practiceConfigFailed'));
+            setError((data && data.error) || t('settingsSaveFailed'));
             return;
           }
           if (data.config && typeof data.config === 'object') {
@@ -931,14 +1130,25 @@ window.__ModuleLoader__.load({
               return prev ? Object.assign({}, prev, { config: data.config }) : prev;
             });
           }
+          // 存放位置可能变了：清掉旧选中项，重新拉两边的数据
+          if (data.root && state && data.root !== state.root) {
+            practiceSeqRef.current += 1;
+            readSeqRef.current += 1;
+            activeTokenRef.current = 0;
+            setSelection(null);
+            setEditor(null);
+            setReadView(null);
+            setPracticeView(null);
+          }
           setSettingsOpen(false);
+          refresh();
           refreshPractice();
         } catch (err) {
-          if (mountedRef.current) setError(t('requestFailed'));
+          if (mountedRef.current) setError(t('settingsSaveFailed'));
         } finally {
           if (mountedRef.current) setSettingsSaving(false);
         }
-      }, [settingsForm, settingsSaving, refreshPractice, t]);
+      }, [settingsForm, settingsSaving, refresh, refreshPractice, state, t]);
 
       const refreshAll = useCallback(function () {
         refresh();
@@ -949,9 +1159,6 @@ window.__ModuleLoader__.load({
           if (!view || (view.status !== 'dirty' && view.status !== 'saving' && view.status !== 'submitting')) {
             openPractice(selected.id, { force: true });
           }
-        } else if (!selected && !latestEditorRef.current) {
-          // 没有选中项时，刷新后按默认规则重新选中今日任务。
-          practiceAutoOpenedRef.current = false;
         }
       }, [refresh, refreshPractice, openPractice]);
 
@@ -1160,15 +1367,6 @@ window.__ModuleLoader__.load({
         };
       }, [refresh, refreshPractice]);
 
-      // 默认选中今日练习任务（每次挂载一次）；手动刷新且无选中项时也按默认规则重选。
-      useEffect(function () {
-        if (practiceAutoOpenedRef.current || !practice) return;
-        practiceAutoOpenedRef.current = true;
-        if (selectionRef.current || latestEditorRef.current) return;
-        const todayId = getPracticeTodayId(practice);
-        if (todayId) openPractice(todayId);
-      }, [practice, openPractice]);
-
       // 改动后 1.2s 自动保存（标题或正文非空、且仍处于未保存状态）。
       useEffect(function () {
         if (editTick === 0) return undefined;
@@ -1245,28 +1443,65 @@ window.__ModuleLoader__.load({
         return String(right.date || right.id || '').localeCompare(String(left.date || left.id || ''));
       });
 
-      const practiceItems = sortedPracticeTasks.map(function (task) {
+      const practiceConfig = practice && practice.config ? practice.config : {};
+      const practiceTodayTask = practiceTodayTaskId != null
+        ? practiceTasks.find(function (task) { return task.id === practiceTodayTaskId; }) || null
+        : null;
+      const practiceDone = practiceTasks.filter(function (task) { return task.status === 'scored'; }).length;
+      const practiceSubmitted = practiceTasks.filter(function (task) { return task.status === 'submitted'; }).length;
+      const practiceStreakDays = practiceStreak(practiceTasks);
+
+      // 左侧「命题演绎」里的紧凑记录
+      const practiceSideRecords = sortedPracticeTasks.map(function (task) {
         const on = selectedPracticeId != null && selectedPracticeId === task.id;
         const statusLabel = PRACTICE_STATUS_LABELS[task.status] || null;
-        const points = typeof task.points === 'number' ? task.points : Number(task.points) || 0;
         return h('button', {
           key: task.id,
           type: 'button',
-          className: 'essay-desk-item' + (on ? ' essay-desk-item-on' : ''),
+          className: 'essay-desk-side-record' + (on ? ' essay-desk-side-record-on' : ''),
+          title: task.title || t('untitled'),
+          onClick: function () { switchMode('practice'); openPractice(task.id); },
+        },
+        h('span', { className: 'essay-desk-side-record-date' }, shortDate(task.date || task.id)),
+        h('span', { className: 'essay-desk-side-record-title' }, task.title || t('untitled')),
+        statusLabel
+          ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-' + task.status }, t(statusLabel))
+          : null);
+      });
+
+      // 命题演绎首页的记录卡片（带评语摘要）
+      const practiceRecords = sortedPracticeTasks.map(function (task) {
+        const statusLabel = PRACTICE_STATUS_LABELS[task.status] || null;
+        const points = typeof task.points === 'number' ? task.points : Number(task.points) || 0;
+        const dateText = String(task.date || '');
+        const md = dateText ? dateText.slice(5, 7) + ' 月' : '';
+        const day = dateText ? dateText.slice(8, 10) : '';
+        const review = typeof task.review === 'string' ? task.review.trim() : '';
+        return h('button', {
+          key: 'record-' + task.id,
+          type: 'button',
+          className: 'essay-desk-record',
           title: task.title || t('untitled'),
           onClick: function () { openPractice(task.id); },
         },
-        h('span', { className: 'essay-desk-item-row' },
-          h('span', { className: 'essay-desk-item-title' }, task.title || t('untitled')),
-          h('span', { className: 'essay-desk-pchip essay-desk-pchip-points' },
-            fmt(t('practicePointsDelta'), { n: points }))),
-        h('span', { className: 'essay-desk-item-meta' },
-          task.date ? h('span', { className: 'essay-desk-chip' }, shortDate(task.date)) : null,
-          practiceTodayTaskId != null && task.id === practiceTodayTaskId
-            ? h('span', { className: 'essay-desk-chip' }, t('practiceToday'))
-            : null,
-          statusLabel ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-' + task.status }, t(statusLabel)) : null,
-          task.type ? h('span', { className: 'essay-desk-chip' }, task.type) : null));
+        h('span', { className: 'essay-desk-record-date' },
+          h('span', { className: 'essay-desk-record-md' }, md),
+          h('span', { className: 'essay-desk-record-day' }, day)),
+        h('span', { className: 'essay-desk-record-main' },
+          h('span', { className: 'essay-desk-record-title' },
+            h('span', { className: 'essay-desk-record-title-text' }, task.title || t('untitled')),
+            statusLabel
+              ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-' + task.status }, t(statusLabel))
+              : null,
+            points > 0
+              ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-points' },
+                fmt(t('practicePointsDelta'), { n: points }))
+              : null),
+          h('span', { className: 'essay-desk-record-meta' },
+            task.type ? h('span', null, task.type) : null,
+            task.motif ? h('span', null, '· ' + task.motif) : null,
+            task.chars ? h('span', null, '· ' + fmt(t('chars'), { n: task.chars })) : null),
+          review ? h('span', { className: 'essay-desk-record-review' }, review) : null));
       });
 
       // 练习任务视图：题目只读 + 我的演绎 + 保存/提交 + 评语积分。
@@ -1368,11 +1603,89 @@ window.__ModuleLoader__.load({
                 : null) : null));
       }
 
-      // 练习设置弹窗：关键词 / 推送时间 / 启用开关。
+      // 命题演绎首页：今日命题 + 数据概览 + 任务记录
+      function buildPracticeHome() {
+        const config = practiceConfig;
+        const configText = config.enabled === false
+          ? t('practiceSettingsOff')
+          : fmt(t('practiceSettingsSummary'), { time: config.time || '09:00' });
+        const todayTask = practiceTodayTask;
+        const heroChips = [];
+        if (todayTask) {
+          if (todayTask.date) heroChips.push(h('span', { key: 'd', className: 'essay-desk-chip' }, todayTask.date));
+          if (todayTask.type) heroChips.push(h('span', { key: 't', className: 'essay-desk-chip' }, todayTask.type));
+          if (todayTask.motif) heroChips.push(h('span', { key: 'm', className: 'essay-desk-chip' }, todayTask.motif));
+          const label = PRACTICE_STATUS_LABELS[todayTask.status];
+          if (label) {
+            heroChips.push(h('span', {
+              key: 's',
+              className: 'essay-desk-pchip essay-desk-pchip-' + todayTask.status,
+            }, t(label)));
+          }
+        }
+
+        const hero = h('section', { className: 'essay-desk-hero' },
+          h('div', { className: 'essay-desk-hero-top' },
+            h('span', { className: 'essay-desk-hero-label' }, t('practiceTodayTitle')),
+            h('span', { className: 'essay-desk-pchip' }, configText)),
+          h('h2', { className: 'essay-desk-hero-title' },
+            todayTask && todayTask.title ? todayTask.title : t('practiceNoToday')),
+          h('p', { className: 'essay-desk-hero-sub' },
+            todayTask ? t('practiceHomeSub') : t('practiceNoTodayHint')),
+          todayTask ? h('div', { className: 'essay-desk-hero-chips' }, heroChips) : null,
+          h('div', { className: 'essay-desk-hero-actions' },
+            todayTask
+              ? h('button', {
+                type: 'button',
+                className: 'essay-desk-btn essay-desk-btn-primary',
+                onClick: function () { openPractice(todayTask.id); },
+              }, t('practiceOpenToday'))
+              : h('button', {
+                type: 'button',
+                className: 'essay-desk-btn essay-desk-btn-primary',
+                disabled: claiming,
+                onClick: function () { claimPractice(); },
+              }, claiming ? t('practiceClaiming') : t('practiceClaim')),
+            h('button', {
+              type: 'button',
+              className: 'essay-desk-btn',
+              onClick: function () { openSettings(); },
+            }, t('practiceSettings')),
+            practiceSubmitted > 0
+              ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-submitted' },
+                t('practiceWaitingReview'))
+              : null));
+
+        const stats = h('div', { className: 'essay-desk-stats' },
+          h('div', { className: 'essay-desk-stat' },
+            h('div', { className: 'essay-desk-stat-value' }, String(practiceTotalPoints)),
+            h('div', { className: 'essay-desk-stat-label' }, t('practiceStatPoints'))),
+          h('div', { className: 'essay-desk-stat' },
+            h('div', { className: 'essay-desk-stat-value' }, String(practiceDone)),
+            h('div', { className: 'essay-desk-stat-label' }, t('practiceStatDone'))),
+          h('div', { className: 'essay-desk-stat' },
+            h('div', { className: 'essay-desk-stat-value' }, fmt(t('practiceDay'), { n: practiceStreakDays })),
+            h('div', { className: 'essay-desk-stat-label' }, t('practiceStatStreak'))));
+
+        const records = h('section', { className: 'essay-desk-home-sec' },
+          h('div', { className: 'essay-desk-home-sec-head' },
+            h('span', { className: 'essay-desk-home-sec-title' }, t('practiceRecords')),
+            h('span', { className: 'essay-desk-home-sec-count' },
+              fmt(t('practiceRecordsCount'), { n: practiceTasks.length }))),
+          practiceRecords.length
+            ? h('div', { className: 'essay-desk-records' }, practiceRecords)
+            : h('div', { className: 'essay-desk-empty-card' }, t('practiceRecordsEmpty')));
+
+        return h('div', { className: 'essay-desk-practice-home' },
+          h('div', { className: 'essay-desk-home-wrap' }, hero, stats, records));
+      }
+
+      // 设置弹窗：存放位置 + 命题演绎（每日推送 / 关键词）
       function buildSettingsModal() {
         const patchForm = function (patch) {
           setSettingsForm(Object.assign({}, settingsForm, patch));
         };
+        const defaultRoot = state && typeof state.defaultRoot === 'string' ? state.defaultRoot : '';
         return h('div', {
           className: 'essay-desk-modal',
           role: 'presentation',
@@ -1384,39 +1697,59 @@ window.__ModuleLoader__.load({
           className: 'essay-desk-modal-box',
           role: 'dialog',
           'aria-modal': true,
-          'aria-label': t('practiceSettingsTitle'),
+          'aria-label': t('settingsTitle'),
         },
-        h('div', { className: 'essay-desk-modal-title' }, t('practiceSettingsTitle')),
-        h('div', { className: 'essay-desk-field essay-desk-field-row' },
-          h('span', { className: 'essay-desk-field-label' }, t('practiceEnabled')),
-          h('input', {
-            type: 'checkbox',
-            className: 'essay-desk-switch',
-            checked: !!settingsForm.enabled,
-            'aria-label': t('practiceEnabled'),
-            onChange: function (event) { patchForm({ enabled: event.target.checked }); },
-          })),
-        h('div', { className: 'essay-desk-field' },
-          h('span', { className: 'essay-desk-field-label' }, t('practiceTime')),
-          h('input', {
-            type: 'time',
-            className: 'essay-desk-input essay-desk-input-time',
-            value: settingsForm.time,
-            step: 60,
-            onChange: function (event) { patchForm({ time: event.target.value }); },
-          }),
-          h('span', { className: 'essay-desk-field-hint' }, t('practiceTimeHint'))),
-        h('div', { className: 'essay-desk-field' },
-          h('span', { className: 'essay-desk-field-label' }, t('practiceKeywords')),
-          h('textarea', {
-            className: 'essay-desk-input essay-desk-textarea-settings',
-            value: settingsForm.keywords,
-            placeholder: t('practiceKeywordsPlaceholder'),
-            'aria-label': t('practiceKeywords'),
-            spellCheck: false,
-            onChange: function (event) { patchForm({ keywords: event.target.value }); },
-          }),
-          h('span', { className: 'essay-desk-field-hint' }, t('practiceKeywordsHint'))),
+        h('div', { className: 'essay-desk-modal-title' }, t('settingsTitle')),
+        h('div', { className: 'essay-desk-modal-sec essay-desk-modal-sec-first' },
+          h('div', { className: 'essay-desk-modal-sec-title' }, t('settingsSectionRoot')),
+          h('div', { className: 'essay-desk-field' },
+            h('span', { className: 'essay-desk-field-label' }, t('settingsRoot')),
+            h('input', {
+              type: 'text',
+              className: 'essay-desk-input essay-desk-input-path',
+              value: settingsForm.root,
+              placeholder: t('settingsRootPlaceholder'),
+              'aria-label': t('settingsRoot'),
+              spellCheck: false,
+              onChange: function (event) { patchForm({ root: event.target.value }); },
+            }),
+            h('span', { className: 'essay-desk-field-hint' }, t('settingsRootHint')),
+            defaultRoot
+              ? h('span', { className: 'essay-desk-field-hint' },
+                fmt(t('settingsDefaultRootTip'), { root: defaultRoot }))
+              : null)),
+        h('div', { className: 'essay-desk-modal-sec' },
+          h('div', { className: 'essay-desk-modal-sec-title' }, t('settingsSectionPractice')),
+          h('div', { className: 'essay-desk-field essay-desk-field-row' },
+            h('span', { className: 'essay-desk-field-label' }, t('practiceEnabled')),
+            h('input', {
+              type: 'checkbox',
+              className: 'essay-desk-switch',
+              checked: !!settingsForm.enabled,
+              'aria-label': t('practiceEnabled'),
+              onChange: function (event) { patchForm({ enabled: event.target.checked }); },
+            })),
+          h('div', { className: 'essay-desk-field' },
+            h('span', { className: 'essay-desk-field-label' }, t('practiceTime')),
+            h('input', {
+              type: 'time',
+              className: 'essay-desk-input essay-desk-input-time',
+              value: settingsForm.time,
+              step: 60,
+              onChange: function (event) { patchForm({ time: event.target.value }); },
+            }),
+            h('span', { className: 'essay-desk-field-hint' }, t('practiceTimeHint'))),
+          h('div', { className: 'essay-desk-field' },
+            h('span', { className: 'essay-desk-field-label' }, t('practiceKeywords')),
+            h('textarea', {
+              className: 'essay-desk-input essay-desk-textarea-settings',
+              value: settingsForm.keywords,
+              placeholder: t('practiceKeywordsPlaceholder'),
+              'aria-label': t('practiceKeywords'),
+              spellCheck: false,
+              onChange: function (event) { patchForm({ keywords: event.target.value }); },
+            }),
+            h('span', { className: 'essay-desk-field-hint' }, t('practiceKeywordsHint')))),
         h('div', { className: 'essay-desk-modal-actions' },
           h('button', {
             type: 'button',
@@ -1463,13 +1796,17 @@ window.__ModuleLoader__.load({
       });
 
       let mainContent = null;
-      if (selectedPracticeId != null) {
-        if (practiceView && practiceView.id === selectedPracticeId) {
-          mainContent = buildPracticeView();
-        } else if (practiceTaskLoading) {
-          mainContent = h('div', { className: 'essay-desk-placeholder' }, t('practiceTaskLoading'));
+      if (mode === 'practice') {
+        if (selectedPracticeId != null) {
+          if (practiceView && practiceView.id === selectedPracticeId) {
+            mainContent = buildPracticeView();
+          } else if (practiceTaskLoading) {
+            mainContent = h('div', { className: 'essay-desk-placeholder' }, t('practiceTaskLoading'));
+          } else {
+            mainContent = h('div', { className: 'essay-desk-placeholder' }, t('practiceTaskFailed'));
+          }
         } else {
-          mainContent = h('div', { className: 'essay-desk-placeholder' }, t('practiceTaskFailed'));
+          mainContent = buildPracticeHome();
         }
       } else if (editor) {
         let statusText;
@@ -1535,72 +1872,143 @@ window.__ModuleLoader__.load({
         mainContent = h('div', { className: 'essay-desk-placeholder' }, t('emptyEditor'));
       }
 
-      const summary = [
-        t('workshop'),
-        fmt(t('draftsCount'), { n: draftsTotal }),
-        fmt(t('topicsCount'), { n: topicsTotal }),
-      ].join(' · ');
+      const practiceConfigText = practiceConfig.enabled === false
+        ? t('practiceSettingsOff')
+        : fmt(t('practiceSettingsSummary'), { time: practiceConfig.time || '09:00' });
+      const summary = mode === 'practice'
+        ? [t('navPractice'), fmt(t('practiceRecordsCount'), { n: practiceTasks.length }),
+          fmt(t('practicePointsShort'), { n: practiceTotalPoints })].join(' · ')
+        : [t('workshop'), fmt(t('draftsCount'), { n: draftsTotal }), fmt(t('topicsCount'), { n: topicsTotal })].join(' · ');
+
+      const navButton = function (key, Icon, label, sub) {
+        const on = mode === key;
+        return h('button', {
+          key: 'nav-' + key,
+          type: 'button',
+          className: 'essay-desk-nav-btn' + (on ? ' essay-desk-nav-btn-on' : ''),
+          'aria-pressed': on,
+          onClick: function () { switchMode(key); },
+        },
+        h('span', { className: 'essay-desk-nav-icon' }, h(Icon, { size: 16 })),
+        h('span', { className: 'essay-desk-nav-text' },
+          h('span', { className: 'essay-desk-nav-title' }, label),
+          h('span', { className: 'essay-desk-nav-sub' }, sub)));
+      };
+
+      const essaySide = [
+        h('div', { key: 'drafts-sec', className: 'essay-desk-sec' },
+          h('span', null, t('drafts')),
+          h('span', { className: 'essay-desk-sec-count' }, '(' + draftsTotal + ')')),
+        h('div', { key: 'drafts-tip', className: 'essay-desk-tip' }, t('hintClassify')),
+        loading && !state ? h('div', { key: 'drafts-loading', className: 'essay-desk-loading' }, t('loading')) : null,
+        !loading && !drafts.length
+          ? h('div', { key: 'drafts-empty', className: 'essay-desk-empty-mini' }, t('draftsEmpty'))
+          : null,
+        draftItems,
+        h('div', { key: 'topics-sec', className: 'essay-desk-sec' },
+          h('span', null, t('topics')),
+          h('span', { className: 'essay-desk-sec-count' }, '(' + topicsTotal + ')')),
+        !topics.length
+          ? h('div', { key: 'topics-empty', className: 'essay-desk-empty-mini' }, t('topicsEmpty'))
+          : null,
+        topicItems,
+        h('button', {
+          key: 'notes',
+          type: 'button',
+          className: 'essay-desk-item' + (notesSelected ? ' essay-desk-item-on' : ''),
+          onClick: function () { openNotes(); },
+        },
+        h('span', { className: 'essay-desk-item-row' },
+          h('span', { className: 'essay-desk-item-title' }, t('notesItem')))),
+      ];
+
+      const practiceSide = [
+        h('div', { key: 'brief', className: 'essay-desk-side-brief' },
+          h('div', { className: 'essay-desk-side-brief-row' },
+            h('span', null, t('practiceTodayTitle')),
+            h('strong', null, practiceConfigText)),
+          h('div', { className: 'essay-desk-side-brief-row' },
+            h('span', null, t('practiceStatPoints')),
+            h('strong', null, String(practiceTotalPoints))),
+          h('div', { className: 'essay-desk-side-brief-row' },
+            h('span', null, t('practiceStatDone')),
+            h('strong', null, String(practiceDone)))),
+        h('div', { key: 'actions', className: 'essay-desk-side-actions' },
+          h('button', {
+            type: 'button',
+            className: 'essay-desk-btn essay-desk-btn-primary',
+            disabled: claiming,
+            onClick: function () { claimPractice(); },
+          }, claiming ? t('practiceClaiming') : t('practiceClaim')),
+          h('button', {
+            type: 'button',
+            className: 'essay-desk-btn',
+            onClick: function () { openSettings(); },
+          }, t('settingsButton'))),
+        h('div', { key: 'records-sec', className: 'essay-desk-sec' },
+          h('span', null, t('practiceRecords')),
+          h('span', { className: 'essay-desk-sec-count' }, '(' + practiceTasks.length + ')')),
+        loading && !practice
+          ? h('div', { key: 'records-loading', className: 'essay-desk-loading' }, t('loading'))
+          : null,
+        !loading && !practiceTasks.length
+          ? h('div', { key: 'records-empty', className: 'essay-desk-empty-mini' }, t('practiceRecordsEmpty'))
+          : null,
+        h('div', { key: 'records', className: 'essay-desk-side-records' }, practiceSideRecords),
+      ];
 
       return h('div', { className: 'essay-desk-root' },
         h('style', null, CSS),
         h('header', { className: 'essay-desk-head' },
           h('div', { className: 'essay-desk-head-main' },
-            h('h1', { className: 'essay-desk-title' }, t('title')),
+            h('h1', { className: 'essay-desk-title' }, t('workshop')),
             h('span', { className: 'essay-desk-slogan' }, t('slogan')),
             h('span', { className: 'essay-desk-sub' }, summary)),
           h('div', { className: 'essay-desk-head-actions' },
-            h('span', {
-              className: 'essay-desk-points-chip',
-              title: t('practiceSection'),
-            }, fmt(t('practicePointsShort'), { n: practiceTotalPoints })),
+            mode === 'practice'
+              ? h('span', {
+                className: 'essay-desk-points-chip',
+                title: t('practiceStatPoints'),
+              }, fmt(t('practicePointsShort'), { n: practiceTotalPoints }))
+              : null,
             h('button', {
               type: 'button',
               className: 'essay-desk-btn',
-              title: t('practiceSettings'),
+              title: t('settingsButton'),
               onClick: function () { openSettings(); },
-            }, t('practiceSettings')),
+            }, t('settingsButton')),
             h('button', {
               type: 'button',
               className: 'essay-desk-btn',
               title: t('refresh'),
               onClick: function () { refreshAll(); },
             }, t('refresh')),
-            h('button', {
-              type: 'button',
-              className: 'essay-desk-btn essay-desk-btn-primary',
-              onClick: function () { newDraft(); },
-            }, t('newEssay')))),
+            mode === 'practice'
+              ? (practiceTodayTask
+                ? h('button', {
+                  type: 'button',
+                  className: 'essay-desk-btn essay-desk-btn-primary',
+                  onClick: function () { openPractice(practiceTodayTask.id); },
+                }, t('practiceOpenToday'))
+                : h('button', {
+                  type: 'button',
+                  className: 'essay-desk-btn essay-desk-btn-primary',
+                  disabled: claiming,
+                  onClick: function () { claimPractice(); },
+                }, claiming ? t('practiceClaiming') : t('practiceClaim')))
+              : h('button', {
+                type: 'button',
+                className: 'essay-desk-btn essay-desk-btn-primary',
+                onClick: function () { newDraft(); },
+              }, t('newEssay')))),
         error ? h('div', { className: 'essay-desk-error', role: 'alert' }, error) : null,
         h('div', { className: 'essay-desk-body' },
           h('aside', { className: 'essay-desk-side' },
-            h('div', { className: 'essay-desk-sec' },
-              h('span', null, t('practiceSection')),
-              h('span', { className: 'essay-desk-points-badge' },
-                fmt(t('practicePointsShort'), { n: practiceTotalPoints }))),
-            practice
-              ? (practiceItems.length
-                ? practiceItems
-                : h('div', { className: 'essay-desk-empty-mini' }, t('practiceEmpty')))
-              : (loading ? h('div', { className: 'essay-desk-loading' }, t('loading')) : null),
-            h('div', { className: 'essay-desk-sec' },
-              h('span', null, t('drafts')),
-              h('span', { className: 'essay-desk-sec-count' }, '(' + draftsTotal + ')')),
-            h('div', { className: 'essay-desk-tip' }, t('hintClassify')),
-            loading && !state ? h('div', { className: 'essay-desk-loading' }, t('loading')) : null,
-            !loading && !drafts.length ? h('div', { className: 'essay-desk-empty-mini' }, t('draftsEmpty')) : null,
-            draftItems,
-            h('div', { className: 'essay-desk-sec' },
-              h('span', null, t('topics')),
-              h('span', { className: 'essay-desk-sec-count' }, '(' + topicsTotal + ')')),
-            !topics.length ? h('div', { className: 'essay-desk-empty-mini' }, t('topicsEmpty')) : null,
-            topicItems,
-            h('button', {
-              type: 'button',
-              className: 'essay-desk-item' + (notesSelected ? ' essay-desk-item-on' : ''),
-              onClick: function () { openNotes(); },
-            },
-            h('span', { className: 'essay-desk-item-row' },
-              h('span', { className: 'essay-desk-item-title' }, t('notesItem'))))),
+            h('div', { className: 'essay-desk-nav' },
+              navButton('essay', BookIcon, t('navEssays'), t('navEssaysSub')),
+              navButton('practice', PenIcon, t('navPractice'), t('navPracticeSub')),
+              h('div', { className: 'essay-desk-nav-divider' })),
+            mode === 'practice' ? practiceSide : essaySide),
           h('div', { className: 'essay-desk-main' }, mainContent)),
         h('footer', { className: 'essay-desk-foot', title: root },
           fmt(t('footerRoot'), { root: root || '—' })),
@@ -1628,6 +2036,32 @@ window.__ModuleLoader__.load({
       h('path', { d: 'M14 3.5V8h5' }),
       h('path', { d: 'M8 12h8' }),
       h('path', { d: 'M8 15.5h5.5' }));
+    }
+
+    /** 随笔入口：摊开的书 */
+    function BookIcon(props) {
+      const size = props && props.size != null ? props.size : 16;
+      return h('svg', {
+        width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': true, focusable: 'false',
+      },
+      h('path', { d: 'M12 6.2C10.2 4.9 7.9 4.4 5 4.6v13c2.9-.2 5.2.3 7 1.6 1.8-1.3 4.1-1.8 7-1.6v-13c-2.9-.2-5.2.3-7 1.6z' }),
+      h('path', { d: 'M12 6.2v13' }),
+      h('path', { d: 'M8 8.5h1.5M8 11.5h1.5M14.5 8.5H16M14.5 11.5H16' }));
+    }
+
+    /** 命题演绎入口：羽毛笔 */
+    function PenIcon(props) {
+      const size = props && props.size != null ? props.size : 16;
+      return h('svg', {
+        width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': true, focusable: 'false',
+      },
+      h('path', { d: 'M20 4.5c-5.4-.6-9.3 1.5-11.7 4.4C6.2 11.3 5.4 14 5 17.5c3.4-.4 6.1-1.2 8.6-3.3 2.9-2.4 5-6.3 4.4-11.7z' }),
+      h('path', { d: 'M4.5 19.5c2.4-3.2 4.8-5.6 8.6-8.6' }),
+      h('path', { d: 'M11 9.5c2 1.8 3.2 3.1 4.3 5' }));
     }
 
     return {

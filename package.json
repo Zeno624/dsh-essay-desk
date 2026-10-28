@@ -1,8 +1,8 @@
 {
   "name": "dsh-essay-desk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "随笔工坊：在 Harness Web GUI 里写随笔，按主题归档成 Markdown，并沉淀思想脉络 · Essay desk: write essays in the Harness Web UI, organize them into topic Markdown files, and keep a record of how your thinking evolves.",
+  "description": "随笔工坊：在 Harness Web GUI 里写随笔、按主题归档、沉淀思想脉络，并每天写一道命题 · Essay desk: write essays, archive them into topic Markdown files, keep a thread of your thinking, and practice with a daily prompt.",
   "icon": "icon.svg",
   "type": "module",
   "license": "MIT",

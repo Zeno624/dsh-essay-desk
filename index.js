@@ -10,14 +10,17 @@
 //   1. id / 主题名都不带路径分隔符，拼出的绝对路径一律经 assertInside 确认仍在 <root> 内；
 //   2. 时间是本地时区（+08:00）表述，markdown 内用 `yyyy-MM-dd HH:mm`，API 用带偏移的 ISO；
 //   3. 所有对外文案、错误信息都用中文。
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, renameSync, statSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 
 export const name = 'essay-desk'
 export const inject = ['webServer', 'tools', 'systemPrompt', 'timer']
 
 const DEFAULT_ROOT = 'essays'
+// 默认数据目录名：放在工作区目录下的「随笔」文件夹里，方便用户直接看见自己的文字
+const WORKSPACE_ROOT_NAME = '随笔'
 const API_PATH = '/essay-desk/api'
 const BODY_LIMIT = 2 * 1024 * 1024 // 2MB
 const DRAFT_DIR = '未分类'
@@ -174,9 +177,43 @@ export function writePracticeConfig(patch = {}) {
 
 // ---------------- 根目录解析（CONTRACT §2） ----------------
 
+/** 插件自身所在目录（link: 安装时解析为仓库的真实路径） */
+function pluginDir() {
+  try {
+    return dirname(fileURLToPath(import.meta.url))
+  } catch (error) {
+    return ''
+  }
+}
+
+/**
+ * 猜测「工作区」目录：DSH_WORKSPACE 环境变量 > 插件目录的上一级。
+ * 插件通常被 clone 到工作区里（<工作区>/dsh-essay-desk），所以上一级就是工作区；
+ * 装在 node_modules 或用户主目录这类位置时不做猜测，交给旧默认目录兜底。
+ */
+function workspaceDir() {
+  const fromEnv = String(process.env.DSH_WORKSPACE || '').trim()
+  if (fromEnv && isAbsolute(fromEnv)) return resolve(fromEnv)
+  const dir = pluginDir()
+  if (!dir) return ''
+  const parent = dirname(dir)
+  const name = basename(parent)
+  if (!parent || parent === dir) return ''
+  if (name === 'node_modules' || name === 'profiles' || name === 'essays') return ''
+  if (resolve(parent) === resolve(homedir()) || resolve(parent) === resolve('/')) return ''
+  return parent
+}
+
+/** 默认根目录：<工作区>/随笔；无法判定工作区时退回 <DSH_HOME>/essays */
+function defaultRootDir() {
+  const workspace = workspaceDir()
+  if (workspace) return join(workspace, WORKSPACE_ROOT_NAME)
+  return join(dirname(configFilePath()), DEFAULT_ROOT)
+}
+
 /**
  * 优先 ESSAY_DESK_ROOT（绝对路径）→ <DSH_HOME 或 ~/.dsh>/essay-desk.json 的 { root }
- * → 默认 <DSH_HOME 或 ~/.dsh>/essays。同级来源不可用时静默回落，保证插件一定能启动。
+ * → 默认 <工作区>/随笔（旧版本默认 <DSH_HOME>/essays）。同级来源不可用时静默回落。
  */
 export function resolveRoot() {
   const fromEnv = String(process.env.ESSAY_DESK_ROOT || '').trim()
@@ -190,7 +227,42 @@ export function resolveRoot() {
   } catch (error) {
     // 配置文件损坏不该让插件加载失败：回落到默认根目录，具体读写错误由各操作报出
   }
-  return resolve(join(dirname(configPath), DEFAULT_ROOT))
+  return resolve(defaultRootDir())
+}
+
+/** 旧版本默认目录；新默认目录不存在且旧目录里有内容时整体搬过去（只在插件启动时做一次） */
+function migrateLegacyRoot(target) {
+  const legacy = join(dirname(configFilePath()), DEFAULT_ROOT)
+  if (resolve(legacy) === resolve(target)) return
+  if (existsSync(target) || !existsSync(legacy)) return
+  try {
+    renameSync(legacy, target)
+  } catch (error) {
+    try {
+      cpSync(legacy, target, { recursive: true })
+    } catch (copyError) {
+      // 搬不动就留在原地：默认目录仍会创建，旧数据用户可手工移动
+    }
+  }
+}
+
+/** 写「存放位置」设置；传空字符串表示恢复默认。返回生效后的根目录 */
+export function writeRootConfig(value) {
+  const file = configFilePath()
+  const settings = readConfigObject(true)
+  const raw = String(value ?? '').trim()
+  let next
+  if (!raw) {
+    next = { ...settings }
+    delete next.root
+  } else {
+    const expanded = raw === '~' ? homedir() : raw.startsWith('~/') ? join(homedir(), raw.slice(2)) : raw
+    if (!isAbsolute(expanded)) throw new Error('存放位置需要是绝对路径（例如 /Users/你/随笔）')
+    next = { ...settings, root: resolve(expanded) }
+  }
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  return resolveRoot()
 }
 
 /**
@@ -1520,6 +1592,8 @@ export function practiceState(root = resolveRoot()) {
       status: task.status,
       points: task.points,
       chars: task.chars,
+      // 记录卡片直接展示一小段评语，不必再打开任务
+      review: typeof task.review === 'string' ? task.review.slice(0, 160) : '',
     }))
     .sort((a, b) => b.id.localeCompare(a.id))
   const points = readPracticePoints(root)
@@ -1630,7 +1704,7 @@ async function handleApi(req, res) {
 async function runOp(root, request) {
   switch (String(request.op || '')) {
     case 'state':
-      return { ok: true, ...listState(root) }
+      return { ok: true, ...listState(root), defaultRoot: defaultRootDir() }
     case 'read':
       return opRead(root, request)
     case 'save':
@@ -1641,6 +1715,22 @@ async function runOp(root, request) {
       return opClassify(root, request)
     case 'note':
       return opNote(root, request)
+    case 'config.save': {
+      // 一次保存「存放位置 + 命题演绎设置」：root 为空表示恢复默认
+      if (request.root !== undefined) writeRootConfig(request.root)
+      const patch = {}
+      if (request.enabled !== undefined) patch.enabled = request.enabled
+      if (request.time !== undefined) patch.time = request.time
+      if (request.keywords !== undefined) patch.keywords = request.keywords
+      if (Object.keys(patch).length) writePracticeConfig(patch)
+      ensureDirs()
+      return {
+        ok: true,
+        root: resolveRoot(),
+        defaultRoot: defaultRootDir(),
+        config: readPracticeConfig(),
+      }
+    }
     case 'practice.state':
       return { ok: true, ...practiceState(root) }
     case 'practice.read':
@@ -1662,6 +1752,8 @@ async function runOp(root, request) {
       return { ok: true, config }
     }
     case 'practice.generate':
+    case 'practice.claim':
+      // 领取今日命题：当天任务已存在时直接返回，不会覆盖
       return { ok: true, task: generatePracticeTask(root, { date: request.date }) }
     default:
       throw new Error(`未知操作：${request.op ? String(request.op) : '(空)'}`)
@@ -1983,6 +2075,7 @@ function toolPracticeConfig() {
     `写作练习：${config.enabled ? '已开启' : '已关闭'}`,
     `推送时间：${config.time}`,
     `关键词：${config.keywords || '（未设置）'}`,
+    `存放位置：${resolveRoot()}`,
   ]
   return { text: lines.join('\n'), data: config }
 }
@@ -1998,7 +2091,7 @@ function systemPromptText() {
   const root = resolveRoot()
   return [
     '## 随笔工坊',
-    `用户的随笔库在 ${root}：`,
+    `用户的随笔库在 ${root}（默认是工作区目录下的「随笔」文件夹，可在面板「设置」里改，或用 ESSAY_DESK_ROOT 覆盖）：`,
     '- 未分类/<id>.md：用户随手写的草稿；',
     '- 主题/<主题名>.md：已按主题归档的随笔合集（每主题一个文件）；',
     '- 思想脉络.md：阶段性的思想变化总结。',
@@ -2008,11 +2101,11 @@ function systemPromptText() {
     '- 用户想写作或继续写作时：引导他们用侧栏「随笔」面板；也可以直接把用户口述内容用 essay(action=write) 落成草稿。',
     '- 永远不要手工移动/删除随笔文件，统一走 essay 工具，保证格式一致。',
     '',
-    '写作练习：',
-    '- 练习任务在 练习/任务/<YYYYMMDD>.md（每天到配置的推送时间自动生成），累计积分在 练习/积分.json。',
+    '命题演绎（面板第二个入口）：',
+    '- 练习任务在 练习/任务/<YYYYMMDD>.md（到每日推送时间自动生成；用户也可以在面板里点「领取今日命题」主动出题），累计积分在 练习/积分.json。',
     '- 用户说「练习写完了 / 帮我评分」时：先 practice(action=list) 找出 status=submitted 的任务，practice(action=read, id) 通读题目与「我的演绎」，再严格按该任务「反馈标准」的 4 条逐条写评语，然后调用 practice(action=score, id, points, review)。points 传最终积分（基础 10 分 + 0–10 加分，范围 10–20）；review 逐条点评并在最后给一句总体反馈。评分时用 ta 指代角色，不要使用带性别的称呼；评分后告诉用户本次得分、当前累计积分，再给一句话反馈。',
     '- 出题约定：题目角色不标注性别，第三人称统一用 ta；每期会随机指定主视角（front matter 的 `pov: 男/女`，并在「约束」里写明「本期主视角：第一人称（男性/女性视角）」），pov 只表示叙事视角、不代表作者性别；角色可以用社会身份（职业/身份）设定，不必依赖性别关系；不写同性恋 / LGBT 等性少数题材，practice.keywords 里的相关词会在生成时被过滤。',
-    '- 用户想看练习配置时用 practice(action=config)；要改关键词 / 推送时间 / 开关，引导用户用面板的「练习设置」。',
+    '- 用户想看练习配置时用 practice(action=config)；要改关键词 / 推送时间 / 开关 / 存放目录，引导用户用面板「设置」。',
   ].join('\n')
 }
 
@@ -2021,7 +2114,10 @@ function systemPromptText() {
 export function apply(ctx, config = {}) {
   // 根目录只按 CONTRACT §2 解析，行内 config 目前不参与
   try {
-    ensureDirs(resolveRoot())
+    const root = resolveRoot()
+    // 旧版本把数据放在 <DSH_HOME>/essays；换成工作区默认目录后搬一次家
+    migrateLegacyRoot(root)
+    ensureDirs(root)
   } catch (error) {
     // 目录建不出来不该阻塞插件加载：API / 工具会各自返回清晰的中文错误
   }
