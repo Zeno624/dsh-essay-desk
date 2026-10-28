@@ -24,6 +24,7 @@ window.__ModuleLoader__.load({
       nav: '随笔',
       title: '随笔',
       workshop: '随笔工坊',
+      slogan: 'Hone Your Voice.',
       draftsCount: '{n} 篇未分类',
       topicsCount: '{n} 个主题',
       refresh: '刷新',
@@ -60,12 +61,53 @@ window.__ModuleLoader__.load({
       topicEmpty: '这个主题文件还是空的。',
       notesEmpty: '还没有思想脉络总结。在对话里说「总结一下我的思想变化」试试。',
       topicCount: '{n} 篇',
+      // 写作练习
+      practiceSection: '写作练习',
+      practiceSettings: '练习设置',
+      practiceSettingsTitle: '练习设置',
+      practiceEnabled: '启用每日推送',
+      practiceTime: '推送时间',
+      practiceTimeHint: 'HH:MM，例如 09:00',
+      practiceKeywords: '关键词',
+      practiceKeywordsHint: '逗号或空格分隔，留空则按题目库轮换',
+      practiceKeywordsPlaceholder: '旧照片, 末班车, 误会',
+      practiceConfigFailed: '练习设置保存失败。',
+      practiceConfigTimeInvalid: '推送时间格式应为 HH:MM。',
+      practiceCancel: '取消',
+      practiceStatusPending: '待写',
+      practiceStatusWritten: '已写',
+      practiceStatusSubmitted: '已交',
+      practiceStatusScored: '已评',
+      practiceToday: '今日',
+      practicePointsShort: '积分 {n}',
+      practicePointsDelta: '+{n}',
+      practiceEmpty: '还没有练习任务，等 DSH 每日推送一道。',
+      practiceTaskLoading: '练习任务加载中…',
+      practiceTaskFailed: '练习任务打开失败。',
+      practiceEmptyDraft: '先写一点内容再提交。',
+      practiceWaitingReview: '已提交，等待 DSH 评分。',
+      practiceReview: '评语',
+      practiceDraftLabel: '我的演绎',
+      practiceDraftPlaceholder: '在这里写你的演绎…',
+      practiceSaveDraft: '保存草稿',
+      practiceSubmit: '提交',
+      practiceSubmitting: '提交中…',
+      practiceConfirmSubmit: '提交后不能再修改，确认提交？',
+      practiceSaveFailed: '保存草稿失败。',
+      practiceSubmitFailed: '提交失败。',
+      practicePointsEarned: '积分 +{n}',
+      practiceBrief: '命题',
+      practiceBeats: '剧本节拍',
+      practiceDirection: '演绎方向',
+      practiceConstraints: '约束',
+      practiceCriteria: '反馈标准',
     };
 
     const en = {
       nav: 'Essays',
       title: 'Essays',
       workshop: 'Essay Desk',
+      slogan: 'Hone Your Voice.',
       draftsCount: '{n} uncategorized',
       topicsCount: '{n} topics',
       refresh: 'Refresh',
@@ -102,6 +144,46 @@ window.__ModuleLoader__.load({
       topicEmpty: 'This topic file is still empty.',
       notesEmpty: 'No summary yet. Say “summarize how my thinking has changed” in the chat.',
       topicCount: '{n} essays',
+      // Writing practice
+      practiceSection: 'Writing practice',
+      practiceSettings: 'Practice settings',
+      practiceSettingsTitle: 'Practice settings',
+      practiceEnabled: 'Enable daily prompt',
+      practiceTime: 'Push time',
+      practiceTimeHint: 'HH:MM, e.g. 09:00',
+      practiceKeywords: 'Keywords',
+      practiceKeywordsHint: 'Comma or space separated; leave empty to rotate the prompt bank',
+      practiceKeywordsPlaceholder: 'old photo, last train, misunderstanding',
+      practiceConfigFailed: 'Failed to save practice settings.',
+      practiceConfigTimeInvalid: 'Push time must be HH:MM.',
+      practiceCancel: 'Cancel',
+      practiceStatusPending: 'To write',
+      practiceStatusWritten: 'Drafted',
+      practiceStatusSubmitted: 'Submitted',
+      practiceStatusScored: 'Scored',
+      practiceToday: 'Today',
+      practicePointsShort: 'Points {n}',
+      practicePointsDelta: '+{n}',
+      practiceEmpty: 'No practice tasks yet. DSH will push one every day.',
+      practiceTaskLoading: 'Loading practice task…',
+      practiceTaskFailed: 'Failed to open the practice task.',
+      practiceEmptyDraft: 'Write something before submitting.',
+      practiceWaitingReview: 'Submitted. Waiting for DSH to score it.',
+      practiceReview: 'Review',
+      practiceDraftLabel: 'My rendition',
+      practiceDraftPlaceholder: 'Write your rendition here…',
+      practiceSaveDraft: 'Save draft',
+      practiceSubmit: 'Submit',
+      practiceSubmitting: 'Submitting…',
+      practiceConfirmSubmit: 'You cannot edit after submitting. Submit?',
+      practiceSaveFailed: 'Failed to save draft.',
+      practiceSubmitFailed: 'Submit failed.',
+      practicePointsEarned: 'Points +{n}',
+      practiceBrief: 'Brief',
+      practiceBeats: 'Beats',
+      practiceDirection: 'Directions',
+      practiceConstraints: 'Constraints',
+      practiceCriteria: 'Feedback criteria',
     };
 
     // ---------------------------------------------------------------------
@@ -245,6 +327,78 @@ window.__ModuleLoader__.load({
     }
 
     // ---------------------------------------------------------------------
+    // 写作练习：状态映射、分区字段、今日任务与日期工具（纯常量/纯函数）
+    // ---------------------------------------------------------------------
+    const PRACTICE_STATUS_LABELS = {
+      pending: 'practiceStatusPending',
+      written: 'practiceStatusWritten',
+      submitted: 'practiceStatusSubmitted',
+      scored: 'practiceStatusScored',
+    };
+
+    // Host 的练习任务契约使用中文分区键；展示标题仍走 locale。
+    const PRACTICE_SECTIONS = [
+      { key: '命题', label: 'practiceBrief' },
+      { key: '剧本节拍', label: 'practiceBeats' },
+      { key: '演绎方向', label: 'practiceDirection' },
+      { key: '约束', label: 'practiceConstraints' },
+      { key: '反馈标准', label: 'practiceCriteria' },
+    ];
+
+    function shortDate(value) {
+      if (!value) return '';
+      const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
+      if (match) return match[2] + '-' + match[3];
+      return monthDay(value);
+    }
+
+    // Host 的 practice.state 把 today 返回为 'YYYY-MM-DD'；同时兼容任务 id
+    // 'YYYYMMDD' 与任务对象形态，最后再退回本地日期匹配任务。
+    function getPracticeTodayId(practice) {
+      if (!practice) return null;
+      const tasks = Array.isArray(practice.tasks) ? practice.tasks : [];
+      const today = practice.today;
+      const candidates = [];
+      if (typeof today === 'string' && today) {
+        candidates.push(today);
+        candidates.push(today.replace(/-/g, ''));
+      } else if (today && typeof today === 'object' && typeof today.id === 'string') {
+        candidates.push(today.id);
+      }
+      for (let ci = 0; ci < candidates.length; ci += 1) {
+        const candidate = candidates[ci];
+        for (let ti = 0; ti < tasks.length; ti += 1) {
+          const task = tasks[ti];
+          if (task && (task.id === candidate || task.date === today)) return task.id;
+        }
+      }
+      const now = new Date();
+      const stamp = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
+      const numeric = stamp.replace(/-/g, '');
+      for (let index = 0; index < tasks.length; index += 1) {
+        const task = tasks[index];
+        if (task && (task.id === numeric || task.date === stamp)) return task.id;
+      }
+      return null;
+    }
+
+    // 兼容 task.sections.{中文键} 与 task.{中文键} 两种返回形态。
+    function getPracticeSections(task) {
+      if (!task || typeof task !== 'object') return {};
+      if (task.sections && typeof task.sections === 'object') return task.sections;
+      const sections = {};
+      for (let index = 0; index < PRACTICE_SECTIONS.length; index += 1) {
+        const key = PRACTICE_SECTIONS[index].key;
+        if (typeof task[key] === 'string') sections[key] = task[key];
+      }
+      return sections;
+    }
+
+    function stripFrontMatter(source) {
+      return String(source == null ? '' : source).replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+    }
+
+    // ---------------------------------------------------------------------
     // 样式：只使用 --dsw-alias-* 主题 token，class 前缀 essay-desk-
     // ---------------------------------------------------------------------
     const CSS = [
@@ -255,6 +409,7 @@ window.__ModuleLoader__.load({
       '.essay-desk-title{display:flex;align-items:center;margin:0;font-size:18px;font-weight:650;line-height:26px;letter-spacing:-.01em;white-space:nowrap}',
       '.essay-desk-title::before{content:"";flex:none;width:9px;height:9px;border-radius:3px;background:var(--dsw-alias-brand-primary);margin-right:9px;transform:rotate(-10deg)}',
       '.essay-desk-sub{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.essay-desk-slogan{flex:none;color:var(--dsw-alias-brand-primary);font-size:11px;font-style:italic;font-weight:500;letter-spacing:.07em;line-height:18px;opacity:.9;white-space:nowrap}',
       '.essay-desk-head-actions{display:flex;align-items:center;gap:8px;flex:none}',
       '.essay-desk-btn{font:inherit;font-size:12px;font-weight:500;line-height:18px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 12px;cursor:pointer;transition:background .16s ease,border-color .16s ease,color .16s ease,transform .16s ease}',
       '.essay-desk-btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2);border-color:var(--dsw-alias-border-l2)}',
@@ -327,6 +482,56 @@ window.__ModuleLoader__.load({
       '.essay-desk-side::-webkit-scrollbar-thumb:hover,.essay-desk-read-body::-webkit-scrollbar-thumb:hover,.essay-desk-textarea::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-label-tertiary);background-clip:content-box}',
       '.essay-desk-side::-webkit-scrollbar-track,.essay-desk-read-body::-webkit-scrollbar-track,.essay-desk-textarea::-webkit-scrollbar-track{background:transparent}',
       '@media (prefers-reduced-motion:reduce){.essay-desk-btn,.essay-desk-item,.essay-desk-textarea,.essay-desk-title-input{transition:none}.essay-desk-loading::before{animation-duration:2s}}',
+      // 写作练习
+      '.essay-desk-root{position:relative}',
+      '.essay-desk-points-chip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;background:var(--ed-accent-soft);border:1px solid var(--ed-accent-line);color:var(--dsw-alias-brand-primary);font-size:11.5px;font-weight:650;letter-spacing:.01em;white-space:nowrap}',
+      '.essay-desk-points-badge{display:inline-flex;align-items:center;height:19px;padding:0 8px;margin-left:auto;border-radius:999px;background:var(--ed-accent-soft);border:1px solid var(--ed-accent-line);color:var(--dsw-alias-brand-primary);font-size:10.5px;font-weight:650;letter-spacing:0;white-space:nowrap}',
+      '.essay-desk-pchip{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:1;white-space:nowrap}',
+      '.essay-desk-pchip-written{color:var(--dsw-alias-brand-primary);background:var(--ed-accent-soft)}',
+      '.essay-desk-pchip-submitted{color:var(--dsw-alias-state-warn-primary);background:var(--dsw-alias-bg-layer-2)}',
+      '.essay-desk-pchip-scored{color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-bg-layer-2)}',
+      '.essay-desk-pchip-points{color:var(--dsw-alias-brand-primary);font-weight:650;background:var(--ed-accent-soft)}',
+      '.essay-desk-practice{display:flex;flex-direction:column;flex:1;min-height:0}',
+      '.essay-desk-practice-head{flex:none;padding:2px 0 12px;border-bottom:1px solid var(--dsw-alias-border-l1)}',
+      '.essay-desk-practice-title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}',
+      '.essay-desk-practice-title{margin:0;font-size:18px;font-weight:650;line-height:26px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.essay-desk-practice-title::before{content:"";display:inline-block;width:3px;height:15px;border-radius:2px;background:var(--dsw-alias-brand-primary);margin-right:10px;vertical-align:-1px}',
+      '.essay-desk-practice-meta{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:8px}',
+      '.essay-desk-practice-brief{flex:0 1 46%;min-height:120px;width:100%;max-width:820px;margin:0 auto;overflow-y:auto;padding:14px 4px 16px}',
+      '.essay-desk-pbrief-sec{margin:0 0 15px}',
+      '.essay-desk-pbrief-title{margin:0 0 6px;font-size:12px;font-weight:650;letter-spacing:.04em;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-pbrief-body{font-size:13.5px;line-height:1.85;color:var(--dsw-alias-label-primary)}',
+      '.essay-desk-pbrief-body .essay-desk-md-p:last-child{margin-bottom:0}',
+      '.essay-desk-practice-editor{display:flex;flex-direction:column;flex:1;min-height:0;padding-top:11px;border-top:1px solid var(--dsw-alias-border-l1)}',
+      '.essay-desk-practice-bar{flex:none;display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:0 1px 9px}',
+      '.essay-desk-practice-label{font-size:12px;font-weight:650;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-practice-status{font-size:10.5px;line-height:16px;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-practice-actions{display:flex;align-items:center;gap:8px;margin-left:auto}',
+      '.essay-desk-practice-textarea{flex:1;min-height:120px}',
+      '.essay-desk-practice-textarea[readonly]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-practice-hint{font-size:11px;line-height:17px;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-review{flex:none;margin-top:12px;padding:11px 13px;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;background:var(--dsw-alias-bg-layer-1)}',
+      '.essay-desk-review-title{margin-bottom:6px;font-size:11.5px;font-weight:650;letter-spacing:.03em;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-review-body{font-size:13px;line-height:1.75;white-space:pre-wrap;color:var(--dsw-alias-label-primary)}',
+      '.essay-desk-review-points{margin-top:8px;font-size:12px;font-weight:650;color:var(--dsw-alias-brand-primary)}',
+      '.essay-desk-modal{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:22px;background:color-mix(in srgb,var(--dsw-alias-bg-base) 58%,transparent);backdrop-filter:blur(2px)}',
+      '.essay-desk-modal-box{width:min(440px,100%);max-height:100%;overflow-y:auto;padding:18px 18px 16px;border:1px solid var(--dsw-alias-border-l1);border-radius:14px;background:var(--dsw-alias-bg-layer-1);box-shadow:0 18px 48px color-mix(in srgb,var(--dsw-alias-label-primary) 18%,transparent)}',
+      '.essay-desk-modal-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px;font-size:14.5px;font-weight:650;line-height:22px}',
+      '.essay-desk-field{display:flex;flex-direction:column;gap:6px;margin-bottom:15px}',
+      '.essay-desk-field-row{flex-direction:row;align-items:center;justify-content:space-between;gap:12px}',
+      '.essay-desk-field-label{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}',
+      '.essay-desk-field-hint{font-size:10.5px;line-height:15px;color:var(--dsw-alias-label-tertiary)}',
+      '.essay-desk-input{font:inherit;font-size:12.5px;line-height:20px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:6px 10px;outline:none;transition:border-color .16s ease}',
+      '.essay-desk-input:focus{border-color:var(--dsw-alias-brand-primary)}',
+      '.essay-desk-input-time{width:132px}',
+      '.essay-desk-textarea-settings{min-height:76px;resize:vertical;font-size:12.5px;line-height:1.6;padding:8px 10px}',
+      '.essay-desk-switch{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:36px;height:21px;margin:0;border:none;border-radius:999px;background:var(--dsw-alias-border-l2);cursor:pointer;transition:background .16s ease}',
+      '.essay-desk-switch::after{content:"";position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;border-radius:50%;background:var(--dsw-alias-bg-base);transition:transform .16s ease}',
+      '.essay-desk-switch:checked{background:var(--dsw-alias-brand-primary)}',
+      '.essay-desk-switch:checked::after{transform:translateX(15px)}',
+      '.essay-desk-switch:focus-visible{outline:2px solid var(--ed-accent-line);outline-offset:2px}',
+      '.essay-desk-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}',
+      '.essay-desk-head-actions{flex-wrap:wrap;justify-content:flex-end}',
     ].join('\n');
 
     // ---------------------------------------------------------------------
@@ -342,6 +547,13 @@ window.__ModuleLoader__.load({
       const [editor, setEditor] = useState(null);
       const [readView, setReadView] = useState(null);
       const [editTick, setEditTick] = useState(0);
+      // 写作练习
+      const [practice, setPractice] = useState(null);
+      const [practiceTaskLoading, setPracticeTaskLoading] = useState(false);
+      const [practiceView, setPracticeView] = useState(null);
+      const [settingsOpen, setSettingsOpen] = useState(false);
+      const [settingsForm, setSettingsForm] = useState({ enabled: true, time: '09:00', keywords: '' });
+      const [settingsSaving, setSettingsSaving] = useState(false);
 
       const titleRef = useRef(null);
       const focusTimerRef = useRef(0);
@@ -353,10 +565,16 @@ window.__ModuleLoader__.load({
       const mountedRef = useRef(false);
       const latestEditorRef = useRef(null);
       const selectionRef = useRef(null);
+      const practiceViewRef = useRef(null);
+      const practiceSeqRef = useRef(0);
+      const practiceSavingRef = useRef(false);
+      const practiceEditVersionRef = useRef(0);
+      const practiceAutoOpenedRef = useRef(false);
 
       // 把最新值镜像到 ref，供稳定的 useCallback / 定时器读取。
       latestEditorRef.current = editor;
       selectionRef.current = selection;
+      practiceViewRef.current = practiceView;
 
       const readBlocks = useMemo(function () {
         return readView ? renderMarkdown(readView.text, readView.title) : null;
@@ -402,6 +620,29 @@ window.__ModuleLoader__.load({
           if (mountedRef.current) setError(t('requestFailed'));
         } finally {
           if (mountedRef.current) setLoading(false);
+        }
+      }, [t]);
+
+      const refreshPractice = useCallback(async function (options) {
+        const keepError = !!(options && options.keepError);
+        if (!keepError) setError('');
+        try {
+          const data = await call({ op: 'practice.state' });
+          if (!mountedRef.current) return;
+          if (!data || !data.ok) {
+            setError((data && data.error) || t('loadFailed'));
+            return;
+          }
+          setPractice({
+            config: data.config && typeof data.config === 'object'
+              ? data.config
+              : { enabled: true, time: '09:00', keywords: '' },
+            tasks: Array.isArray(data.tasks) ? data.tasks : [],
+            points: data.points && typeof data.points === 'object' ? data.points : { total: 0, history: [] },
+            today: data.today != null ? data.today : null,
+          });
+        } catch (err) {
+          if (mountedRef.current) setError(t('requestFailed'));
         }
       }, [t]);
 
@@ -492,8 +733,233 @@ window.__ModuleLoader__.load({
         setSelection(previousSelection || null);
       }, []);
 
+      // ------------------------- 写作练习 -------------------------
+      const onPracticeTextChange = useCallback(function (event) {
+        const value = event.target.value;
+        practiceEditVersionRef.current += 1;
+        setPracticeView(function (prev) {
+          return prev ? Object.assign({}, prev, { text: value, status: 'dirty' }) : prev;
+        });
+      }, []);
+
+      const savePracticeDraft = useCallback(async function () {
+        const view = practiceViewRef.current;
+        if (!view || practiceSavingRef.current) return;
+        const task = view.task || {};
+        if (task.status === 'submitted' || task.status === 'scored') return;
+        const text = view.text;
+        if (!text.trim()) return;
+        const id = view.id;
+        const version = practiceEditVersionRef.current;
+        practiceSavingRef.current = true;
+        setError('');
+        setPracticeView(function (prev) {
+          return prev && prev.id === id ? Object.assign({}, prev, { status: 'saving' }) : prev;
+        });
+        try {
+          const data = await call({ op: 'practice.save', id: id, text: text });
+          if (!mountedRef.current) return;
+          if (!data || !data.ok) {
+            setError((data && data.error) || t('practiceSaveFailed'));
+            setPracticeView(function (prev) {
+              return prev && prev.id === id ? Object.assign({}, prev, { status: 'dirty' }) : prev;
+            });
+            return;
+          }
+          const clean = practiceEditVersionRef.current === version;
+          setPracticeView(function (prev) {
+            if (!prev || prev.id !== id) return prev;
+            return Object.assign({}, prev, {
+              status: clean ? 'saved' : 'dirty',
+              savedAt: clean ? Date.now() : prev.savedAt,
+              task: Object.assign({}, prev.task, { status: data.status || (prev.task && prev.task.status) || 'written' }),
+            });
+          });
+          refreshPractice({ keepError: true });
+        } catch (err) {
+          if (!mountedRef.current) return;
+          setError(t('requestFailed'));
+          setPracticeView(function (prev) {
+            return prev && prev.id === id ? Object.assign({}, prev, { status: 'dirty' }) : prev;
+          });
+        } finally {
+          practiceSavingRef.current = false;
+        }
+      }, [refreshPractice, t]);
+
+      const submitPractice = useCallback(async function () {
+        const view = practiceViewRef.current;
+        if (!view || practiceSavingRef.current) return;
+        const task = view.task || {};
+        if (task.status === 'submitted' || task.status === 'scored') return;
+        if (!view.text.trim()) {
+          setError(t('practiceEmptyDraft'));
+          return;
+        }
+        if (!window.confirm(t('practiceConfirmSubmit'))) return;
+        const id = view.id;
+        const text = view.text;
+        practiceSavingRef.current = true;
+        setError('');
+        setPracticeView(function (prev) {
+          return prev && prev.id === id ? Object.assign({}, prev, { status: 'submitting' }) : prev;
+        });
+        try {
+          // practice.submit 只接收 id，所以先保存当前正文，避免提交旧草稿。
+          const saved = await call({ op: 'practice.save', id: id, text: text });
+          if (!mountedRef.current) return;
+          if (!saved || !saved.ok) {
+            setError((saved && saved.error) || t('practiceSaveFailed'));
+            setPracticeView(function (prev) {
+              return prev && prev.id === id ? Object.assign({}, prev, { status: 'dirty' }) : prev;
+            });
+            return;
+          }
+          const submitted = await call({ op: 'practice.submit', id: id });
+          if (!mountedRef.current) return;
+          if (!submitted || !submitted.ok) {
+            setError((submitted && submitted.error) || t('practiceSubmitFailed'));
+            setPracticeView(function (prev) {
+              return prev && prev.id === id ? Object.assign({}, prev, { status: 'dirty' }) : prev;
+            });
+            return;
+          }
+          practiceEditVersionRef.current += 1;
+          setPracticeView(function (prev) {
+            if (!prev || prev.id !== id) return prev;
+            return Object.assign({}, prev, {
+              status: 'saved',
+              savedAt: Date.now(),
+              task: Object.assign({}, prev.task, { status: submitted.status || 'submitted' }),
+            });
+          });
+          refreshPractice();
+        } catch (err) {
+          if (!mountedRef.current) return;
+          setError(t('requestFailed'));
+          setPracticeView(function (prev) {
+            return prev && prev.id === id ? Object.assign({}, prev, { status: 'dirty' }) : prev;
+          });
+        } finally {
+          practiceSavingRef.current = false;
+        }
+      }, [refreshPractice, t]);
+
+      const flushPracticeIfDirty = useCallback(function () {
+        const view = practiceViewRef.current;
+        if (view && view.status === 'dirty' && view.text.trim()) savePracticeDraft();
+      }, [savePracticeDraft]);
+
+      const openPractice = useCallback(async function (id, options) {
+        const force = !!(options && options.force);
+        const selected = selectionRef.current;
+        const current = practiceViewRef.current;
+        if (!force && selected && selected.kind === 'practice' && selected.id === id && current && current.id === id) {
+          return;
+        }
+        const previousSelection = selected || null;
+        flushIfDirty();
+        flushPracticeIfDirty();
+        // 让在途的随笔 read/save 失效，避免回写当前选中项。
+        readSeqRef.current += 1;
+        activeTokenRef.current = 0;
+        const seq = practiceSeqRef.current + 1;
+        practiceSeqRef.current = seq;
+        practiceEditVersionRef.current = 0;
+        setError('');
+        setPracticeTaskLoading(true);
+        setSelection({ kind: 'practice', id: id });
+        try {
+          const data = await call({ op: 'practice.read', id: id });
+          if (!mountedRef.current || seq !== practiceSeqRef.current) return;
+          if (!data || !data.ok || !data.task) {
+            setError((data && data.error) || t('practiceTaskFailed'));
+            setPracticeTaskLoading(false);
+            setSelection(previousSelection);
+            return;
+          }
+          setPracticeView({
+            id: id,
+            task: data.task,
+            text: typeof data.task.draft === 'string' ? data.task.draft : '',
+            status: 'loaded',
+            savedAt: 0,
+          });
+          setPracticeTaskLoading(false);
+        } catch (err) {
+          if (!mountedRef.current || seq !== practiceSeqRef.current) return;
+          setError(t('requestFailed'));
+          setPracticeTaskLoading(false);
+          setSelection(previousSelection);
+        }
+      }, [flushIfDirty, flushPracticeIfDirty, t]);
+
+      const openSettings = useCallback(function () {
+        const config = practice && practice.config ? practice.config : {};
+        setSettingsForm({
+          enabled: config.enabled !== false,
+          time: typeof config.time === 'string' && config.time ? config.time : '09:00',
+          keywords: typeof config.keywords === 'string' ? config.keywords : '',
+        });
+        setError('');
+        setSettingsOpen(true);
+      }, [practice]);
+
+      const saveSettings = useCallback(async function () {
+        if (settingsSaving) return;
+        const time = String(settingsForm.time || '').trim();
+        if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+          setError(t('practiceConfigTimeInvalid'));
+          return;
+        }
+        setSettingsSaving(true);
+        setError('');
+        try {
+          const data = await call({
+            op: 'practice.config',
+            enabled: !!settingsForm.enabled,
+            time: time || '09:00',
+            keywords: String(settingsForm.keywords || ''),
+          });
+          if (!mountedRef.current) return;
+          if (!data || !data.ok) {
+            setError((data && data.error) || t('practiceConfigFailed'));
+            return;
+          }
+          if (data.config && typeof data.config === 'object') {
+            setPractice(function (prev) {
+              return prev ? Object.assign({}, prev, { config: data.config }) : prev;
+            });
+          }
+          setSettingsOpen(false);
+          refreshPractice();
+        } catch (err) {
+          if (mountedRef.current) setError(t('requestFailed'));
+        } finally {
+          if (mountedRef.current) setSettingsSaving(false);
+        }
+      }, [settingsForm, settingsSaving, refreshPractice, t]);
+
+      const refreshAll = useCallback(function () {
+        refresh();
+        refreshPractice();
+        const selected = selectionRef.current;
+        if (selected && selected.kind === 'practice') {
+          const view = practiceViewRef.current;
+          if (!view || (view.status !== 'dirty' && view.status !== 'saving' && view.status !== 'submitting')) {
+            openPractice(selected.id, { force: true });
+          }
+        } else if (!selected && !latestEditorRef.current) {
+          // 没有选中项时，刷新后按默认规则重新选中今日任务。
+          practiceAutoOpenedRef.current = false;
+        }
+      }, [refresh, refreshPractice, openPractice]);
+
       const newDraft = useCallback(function () {
         flushIfDirty();
+        flushPracticeIfDirty();
+        practiceSeqRef.current += 1;
+        setPracticeTaskLoading(false);
         readSeqRef.current += 1;
         activeTokenRef.current = 0;
         tokenRef.current += 1;
@@ -514,7 +980,7 @@ window.__ModuleLoader__.load({
         });
         activeTokenRef.current = token;
         focusTitle();
-      }, [flushIfDirty, focusTitle]);
+      }, [flushIfDirty, flushPracticeIfDirty, focusTitle]);
 
       const openDraft = useCallback(async function (item) {
         const selected = selectionRef.current;
@@ -524,6 +990,9 @@ window.__ModuleLoader__.load({
         }
         const previousSelection = selected || null;
         flushIfDirty();
+        flushPracticeIfDirty();
+        practiceSeqRef.current += 1;
+        setPracticeTaskLoading(false);
         const seq = readSeqRef.current + 1;
         readSeqRef.current = seq;
         activeTokenRef.current = 0;
@@ -559,11 +1028,14 @@ window.__ModuleLoader__.load({
             restoreAfterFailedOpen(previousSelection);
           }
         }
-      }, [flushIfDirty, restoreAfterFailedOpen, t]);
+      }, [flushIfDirty, flushPracticeIfDirty, restoreAfterFailedOpen, t]);
 
       const openTopic = useCallback(async function (topic) {
         const previousSelection = selectionRef.current || null;
         flushIfDirty();
+        flushPracticeIfDirty();
+        practiceSeqRef.current += 1;
+        setPracticeTaskLoading(false);
         const seq = readSeqRef.current + 1;
         readSeqRef.current = seq;
         activeTokenRef.current = 0;
@@ -594,11 +1066,14 @@ window.__ModuleLoader__.load({
             restoreAfterFailedOpen(previousSelection);
           }
         }
-      }, [flushIfDirty, restoreAfterFailedOpen, t]);
+      }, [flushIfDirty, flushPracticeIfDirty, restoreAfterFailedOpen, t]);
 
       const openNotes = useCallback(async function () {
         const previousSelection = selectionRef.current || null;
         flushIfDirty();
+        flushPracticeIfDirty();
+        practiceSeqRef.current += 1;
+        setPracticeTaskLoading(false);
         const seq = readSeqRef.current + 1;
         readSeqRef.current = seq;
         activeTokenRef.current = 0;
@@ -628,7 +1103,7 @@ window.__ModuleLoader__.load({
             restoreAfterFailedOpen(previousSelection);
           }
         }
-      }, [flushIfDirty, restoreAfterFailedOpen, t]);
+      }, [flushIfDirty, flushPracticeIfDirty, restoreAfterFailedOpen, t]);
 
       const removeDraft = useCallback(async function () {
         const current = latestEditorRef.current;
@@ -674,15 +1149,25 @@ window.__ModuleLoader__.load({
         });
       }, []);
 
-      // 挂载时拉一次 state；卸载时清理挂起 timer。
+      // 挂载时拉一次随笔 state 与练习 state；卸载时清理挂起 timer。
       useEffect(function () {
         mountedRef.current = true;
         refresh();
+        refreshPractice();
         return function () {
           mountedRef.current = false;
           clearTimeout(focusTimerRef.current);
         };
-      }, [refresh]);
+      }, [refresh, refreshPractice]);
+
+      // 默认选中今日练习任务（每次挂载一次）；手动刷新且无选中项时也按默认规则重选。
+      useEffect(function () {
+        if (practiceAutoOpenedRef.current || !practice) return;
+        practiceAutoOpenedRef.current = true;
+        if (selectionRef.current || latestEditorRef.current) return;
+        const todayId = getPracticeTodayId(practice);
+        if (todayId) openPractice(todayId);
+      }, [practice, openPractice]);
 
       // 改动后 1.2s 自动保存（标题或正文非空、且仍处于未保存状态）。
       useEffect(function () {
@@ -698,11 +1183,20 @@ window.__ModuleLoader__.load({
         };
       }, [editTick, saveDraft]);
 
-      // Ctrl/Cmd+S 保存。
+      // Ctrl/Cmd+S：练习任务视图保存草稿，随笔编辑器保存随笔。
       useEffect(function () {
         function onKeyDown(event) {
           if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
           if (event.key !== 's' && event.key !== 'S') return;
+          const selected = selectionRef.current;
+          if (selected && selected.kind === 'practice') {
+            // 任务视图激活时，Ctrl/Cmd+S 只保存练习草稿，绝不动被隐藏的随笔编辑器。
+            if (practiceViewRef.current) {
+              event.preventDefault();
+              savePracticeDraft();
+            }
+            return;
+          }
           if (!latestEditorRef.current) return;
           event.preventDefault();
           saveDraft();
@@ -711,7 +1205,19 @@ window.__ModuleLoader__.load({
         return function () {
           document.removeEventListener('keydown', onKeyDown);
         };
-      }, [saveDraft]);
+      }, [saveDraft, savePracticeDraft]);
+
+      // 练习设置弹窗：Esc 关闭。
+      useEffect(function () {
+        if (!settingsOpen) return undefined;
+        function onKeyDown(event) {
+          if (event.key === 'Escape') setSettingsOpen(false);
+        }
+        document.addEventListener('keydown', onKeyDown);
+        return function () {
+          document.removeEventListener('keydown', onKeyDown);
+        };
+      }, [settingsOpen]);
 
       // ------------------------- 渲染 -------------------------
       const root = state && typeof state.root === 'string' ? state.root : '';
@@ -724,6 +1230,207 @@ window.__ModuleLoader__.load({
       const selectedDraftId = selection && selection.kind === 'draft' ? selection.id : null;
       const selectedTopicName = selection && selection.kind === 'topic' ? selection.name : null;
       const notesSelected = !!(selection && selection.kind === 'notes');
+
+      // ------------------------- 写作练习派生数据 -------------------------
+      const practiceTasks = practice && Array.isArray(practice.tasks) ? practice.tasks : [];
+      const practiceTotalPoints = practice && practice.points && typeof practice.points.total === 'number'
+        ? practice.points.total
+        : 0;
+      const practiceTodayTaskId = getPracticeTodayId(practice);
+      const selectedPracticeId = selection && selection.kind === 'practice' ? selection.id : null;
+      const sortedPracticeTasks = practiceTasks.slice().sort(function (left, right) {
+        const leftToday = practiceTodayTaskId != null && left.id === practiceTodayTaskId;
+        const rightToday = practiceTodayTaskId != null && right.id === practiceTodayTaskId;
+        if (leftToday !== rightToday) return leftToday ? -1 : 1;
+        return String(right.date || right.id || '').localeCompare(String(left.date || left.id || ''));
+      });
+
+      const practiceItems = sortedPracticeTasks.map(function (task) {
+        const on = selectedPracticeId != null && selectedPracticeId === task.id;
+        const statusLabel = PRACTICE_STATUS_LABELS[task.status] || null;
+        const points = typeof task.points === 'number' ? task.points : Number(task.points) || 0;
+        return h('button', {
+          key: task.id,
+          type: 'button',
+          className: 'essay-desk-item' + (on ? ' essay-desk-item-on' : ''),
+          title: task.title || t('untitled'),
+          onClick: function () { openPractice(task.id); },
+        },
+        h('span', { className: 'essay-desk-item-row' },
+          h('span', { className: 'essay-desk-item-title' }, task.title || t('untitled')),
+          h('span', { className: 'essay-desk-pchip essay-desk-pchip-points' },
+            fmt(t('practicePointsDelta'), { n: points }))),
+        h('span', { className: 'essay-desk-item-meta' },
+          task.date ? h('span', { className: 'essay-desk-chip' }, shortDate(task.date)) : null,
+          practiceTodayTaskId != null && task.id === practiceTodayTaskId
+            ? h('span', { className: 'essay-desk-chip' }, t('practiceToday'))
+            : null,
+          statusLabel ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-' + task.status }, t(statusLabel)) : null,
+          task.type ? h('span', { className: 'essay-desk-chip' }, task.type) : null));
+      });
+
+      // 练习任务视图：题目只读 + 我的演绎 + 保存/提交 + 评语积分。
+      function buildPracticeView() {
+        const view = practiceView;
+        const task = view && view.task ? view.task : {};
+        const locked = task.status === 'submitted' || task.status === 'scored';
+        const sections = getPracticeSections(task);
+        const sectionBlocks = [];
+        for (let index = 0; index < PRACTICE_SECTIONS.length; index += 1) {
+          const def = PRACTICE_SECTIONS[index];
+          const raw = sections && typeof sections[def.key] === 'string' ? sections[def.key] : '';
+          if (!raw.trim()) continue;
+          sectionBlocks.push(h('section', { key: def.key, className: 'essay-desk-pbrief-sec' },
+            h('h3', { className: 'essay-desk-pbrief-title' }, t(def.label)),
+            h('div', { className: 'essay-desk-pbrief-body' },
+              renderMarkdown(raw, null) || h('p', { className: 'essay-desk-md-p' }, raw))));
+        }
+        if (!sectionBlocks.length && typeof task.raw === 'string' && task.raw.trim()) {
+          sectionBlocks.push(h('section', { key: 'raw', className: 'essay-desk-pbrief-sec' },
+            h('div', { className: 'essay-desk-pbrief-body' }, renderMarkdown(stripFrontMatter(task.raw), null))));
+        }
+
+        const statusLabel = PRACTICE_STATUS_LABELS[task.status] || null;
+        const chars = typeof view.text === 'string' ? view.text.length : 0;
+        const points = typeof task.points === 'number' ? task.points : Number(task.points) || 0;
+        const review = typeof task.review === 'string' ? task.review : '';
+        const busy = view.status === 'saving' || view.status === 'submitting';
+        let statusText = '';
+        let statusModifier = 'saved';
+        if (view.status === 'saving') {
+          statusText = t('saving');
+          statusModifier = 'saving';
+        } else if (view.status === 'submitting') {
+          statusText = t('practiceSubmitting');
+          statusModifier = 'saving';
+        } else if (view.status === 'dirty') {
+          statusText = t('unsaved');
+          statusModifier = 'unsaved';
+        } else if (view.status === 'saved') {
+          const timeText = clock(view.savedAt);
+          statusText = timeText ? fmt(t('savedAt'), { time: timeText }) : t('saved');
+        } else if (!locked && view.text) {
+          statusText = t('saved');
+        }
+
+        return h('div', { className: 'essay-desk-practice' },
+          h('div', { className: 'essay-desk-practice-head' },
+            h('div', { className: 'essay-desk-practice-title-row' },
+              h('h2', { className: 'essay-desk-practice-title' }, task.title || t('practiceSection')),
+              statusLabel ? h('span', { className: 'essay-desk-pchip essay-desk-pchip-' + task.status }, t(statusLabel)) : null),
+            h('div', { className: 'essay-desk-practice-meta' },
+              task.date ? h('span', { className: 'essay-desk-chip' }, task.date) : null,
+              task.type ? h('span', { className: 'essay-desk-chip' }, task.type) : null,
+              task.motif ? h('span', { className: 'essay-desk-chip' }, task.motif) : null,
+              practiceTodayTaskId != null && task.id === practiceTodayTaskId
+                ? h('span', { className: 'essay-desk-chip' }, t('practiceToday'))
+                : null)),
+          h('div', { className: 'essay-desk-practice-brief' },
+            sectionBlocks.length
+              ? sectionBlocks
+              : h('div', { className: 'essay-desk-practice-hint' }, t('practiceTaskFailed'))),
+          h('div', { className: 'essay-desk-practice-editor' },
+            h('div', { className: 'essay-desk-practice-bar' },
+              h('span', { className: 'essay-desk-practice-label' }, t('practiceDraftLabel')),
+              h('span', { className: 'essay-desk-practice-status' }, fmt(t('chars'), { n: chars })),
+              statusText
+                ? h('span', { className: 'essay-desk-practice-status essay-desk-status-' + statusModifier }, statusText)
+                : null,
+              locked ? null : h('div', { className: 'essay-desk-practice-actions' },
+                h('button', {
+                  type: 'button',
+                  className: 'essay-desk-btn',
+                  disabled: busy || !view.text.trim(),
+                  onClick: function () { savePracticeDraft(); },
+                }, t('practiceSaveDraft')),
+                h('button', {
+                  type: 'button',
+                  className: 'essay-desk-btn essay-desk-btn-primary',
+                  disabled: busy || !view.text.trim(),
+                  onClick: function () { submitPractice(); },
+                }, view.status === 'submitting' ? t('practiceSubmitting') : t('practiceSubmit')))),
+            h('textarea', {
+              className: 'essay-desk-textarea essay-desk-practice-textarea',
+              value: view.text,
+              readOnly: locked,
+              placeholder: locked ? '' : t('practiceDraftPlaceholder'),
+              'aria-label': t('practiceDraftLabel'),
+              spellCheck: false,
+              onChange: onPracticeTextChange,
+            }),
+            locked ? h('div', { className: 'essay-desk-review' },
+              h('div', { className: 'essay-desk-review-title' }, t('practiceReview')),
+              review
+                ? h('div', { className: 'essay-desk-review-body' }, review)
+                : h('div', { className: 'essay-desk-practice-hint' }, t('practiceWaitingReview')),
+              points > 0
+                ? h('div', { className: 'essay-desk-review-points' }, fmt(t('practicePointsEarned'), { n: points }))
+                : null) : null));
+      }
+
+      // 练习设置弹窗：关键词 / 推送时间 / 启用开关。
+      function buildSettingsModal() {
+        const patchForm = function (patch) {
+          setSettingsForm(Object.assign({}, settingsForm, patch));
+        };
+        return h('div', {
+          className: 'essay-desk-modal',
+          role: 'presentation',
+          onMouseDown: function (event) {
+            if (event.target === event.currentTarget) setSettingsOpen(false);
+          },
+        },
+        h('div', {
+          className: 'essay-desk-modal-box',
+          role: 'dialog',
+          'aria-modal': true,
+          'aria-label': t('practiceSettingsTitle'),
+        },
+        h('div', { className: 'essay-desk-modal-title' }, t('practiceSettingsTitle')),
+        h('div', { className: 'essay-desk-field essay-desk-field-row' },
+          h('span', { className: 'essay-desk-field-label' }, t('practiceEnabled')),
+          h('input', {
+            type: 'checkbox',
+            className: 'essay-desk-switch',
+            checked: !!settingsForm.enabled,
+            'aria-label': t('practiceEnabled'),
+            onChange: function (event) { patchForm({ enabled: event.target.checked }); },
+          })),
+        h('div', { className: 'essay-desk-field' },
+          h('span', { className: 'essay-desk-field-label' }, t('practiceTime')),
+          h('input', {
+            type: 'time',
+            className: 'essay-desk-input essay-desk-input-time',
+            value: settingsForm.time,
+            step: 60,
+            onChange: function (event) { patchForm({ time: event.target.value }); },
+          }),
+          h('span', { className: 'essay-desk-field-hint' }, t('practiceTimeHint'))),
+        h('div', { className: 'essay-desk-field' },
+          h('span', { className: 'essay-desk-field-label' }, t('practiceKeywords')),
+          h('textarea', {
+            className: 'essay-desk-input essay-desk-textarea-settings',
+            value: settingsForm.keywords,
+            placeholder: t('practiceKeywordsPlaceholder'),
+            'aria-label': t('practiceKeywords'),
+            spellCheck: false,
+            onChange: function (event) { patchForm({ keywords: event.target.value }); },
+          }),
+          h('span', { className: 'essay-desk-field-hint' }, t('practiceKeywordsHint'))),
+        h('div', { className: 'essay-desk-modal-actions' },
+          h('button', {
+            type: 'button',
+            className: 'essay-desk-btn',
+            disabled: settingsSaving,
+            onClick: function () { setSettingsOpen(false); },
+          }, t('practiceCancel')),
+          h('button', {
+            type: 'button',
+            className: 'essay-desk-btn essay-desk-btn-primary',
+            disabled: settingsSaving,
+            onClick: function () { saveSettings(); },
+          }, settingsSaving ? t('saving') : t('save')))));
+      }
 
       const draftItems = drafts.map(function (draft) {
         const on = selectedDraftId != null && selectedDraftId === draft.id;
@@ -756,7 +1463,15 @@ window.__ModuleLoader__.load({
       });
 
       let mainContent = null;
-      if (editor) {
+      if (selectedPracticeId != null) {
+        if (practiceView && practiceView.id === selectedPracticeId) {
+          mainContent = buildPracticeView();
+        } else if (practiceTaskLoading) {
+          mainContent = h('div', { className: 'essay-desk-placeholder' }, t('practiceTaskLoading'));
+        } else {
+          mainContent = h('div', { className: 'essay-desk-placeholder' }, t('practiceTaskFailed'));
+        }
+      } else if (editor) {
         let statusText;
         if (editor.status === 'saving') {
           statusText = t('saving');
@@ -831,13 +1546,24 @@ window.__ModuleLoader__.load({
         h('header', { className: 'essay-desk-head' },
           h('div', { className: 'essay-desk-head-main' },
             h('h1', { className: 'essay-desk-title' }, t('title')),
+            h('span', { className: 'essay-desk-slogan' }, t('slogan')),
             h('span', { className: 'essay-desk-sub' }, summary)),
           h('div', { className: 'essay-desk-head-actions' },
+            h('span', {
+              className: 'essay-desk-points-chip',
+              title: t('practiceSection'),
+            }, fmt(t('practicePointsShort'), { n: practiceTotalPoints })),
+            h('button', {
+              type: 'button',
+              className: 'essay-desk-btn',
+              title: t('practiceSettings'),
+              onClick: function () { openSettings(); },
+            }, t('practiceSettings')),
             h('button', {
               type: 'button',
               className: 'essay-desk-btn',
               title: t('refresh'),
-              onClick: function () { refresh(); },
+              onClick: function () { refreshAll(); },
             }, t('refresh')),
             h('button', {
               type: 'button',
@@ -847,6 +1573,15 @@ window.__ModuleLoader__.load({
         error ? h('div', { className: 'essay-desk-error', role: 'alert' }, error) : null,
         h('div', { className: 'essay-desk-body' },
           h('aside', { className: 'essay-desk-side' },
+            h('div', { className: 'essay-desk-sec' },
+              h('span', null, t('practiceSection')),
+              h('span', { className: 'essay-desk-points-badge' },
+                fmt(t('practicePointsShort'), { n: practiceTotalPoints }))),
+            practice
+              ? (practiceItems.length
+                ? practiceItems
+                : h('div', { className: 'essay-desk-empty-mini' }, t('practiceEmpty')))
+              : (loading ? h('div', { className: 'essay-desk-loading' }, t('loading')) : null),
             h('div', { className: 'essay-desk-sec' },
               h('span', null, t('drafts')),
               h('span', { className: 'essay-desk-sec-count' }, '(' + draftsTotal + ')')),
@@ -868,7 +1603,8 @@ window.__ModuleLoader__.load({
               h('span', { className: 'essay-desk-item-title' }, t('notesItem'))))),
           h('div', { className: 'essay-desk-main' }, mainContent)),
         h('footer', { className: 'essay-desk-foot', title: root },
-          fmt(t('footerRoot'), { root: root || '—' })));
+          fmt(t('footerRoot'), { root: root || '—' })),
+        settingsOpen ? buildSettingsModal() : null);
     }
 
     // ---------------------------------------------------------------------

@@ -4,6 +4,8 @@
 //   <root>/未分类/_已整理/<id>.md   归档（delete/classify）后的草稿备份，不对外列出
 //   <root>/主题/<主题名>.md         每个主题一个合集文件
 //   <root>/思想脉络.md              思想变化总结
+//   <root>/练习/任务/<YYYYMMDD>.md  写作练习的每日任务（front matter + 各节）
+//   <root>/练习/积分.json           写作练习总积分与历史
 // 关键不变量：
 //   1. id / 主题名都不带路径分隔符，拼出的绝对路径一律经 assertInside 确认仍在 <root> 内；
 //   2. 时间是本地时区（+08:00）表述，markdown 内用 `yyyy-MM-dd HH:mm`，API 用带偏移的 ISO；
@@ -13,7 +15,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 
 export const name = 'essay-desk'
-export const inject = ['webServer', 'tools', 'systemPrompt']
+export const inject = ['webServer', 'tools', 'systemPrompt', 'timer']
 
 const DEFAULT_ROOT = 'essays'
 const API_PATH = '/essay-desk/api'
@@ -24,6 +26,14 @@ const TOPIC_DIR = '主题'
 const NOTES_FILE = '思想脉络.md'
 const NOTES_TITLE = '思想脉络'
 const UNTITLED = '无题'
+const PRACTICE_DIR = '练习'
+const PRACTICE_TASK_DIR = '任务'
+const PRACTICE_POINTS_FILE = '积分.json'
+const DEFAULT_PRACTICE_TIME = '09:00'
+// 题型按日期日序轮换
+const PRACTICE_TYPES = ['场景+冲突', '情绪', '关系', '场景']
+const PRACTICE_STATUS_LABELS = { pending: '待写', written: '已写', submitted: '已交', scored: '已评' }
+const PRACTICE_CHECK_INTERVAL = 60 * 1000
 const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 // birthtime 比「现在」晚超过这个量时视为不可信（见 fileTimes）
@@ -66,6 +76,78 @@ function timestamp(newDate = new Date()) {
   return `${formatDate(date).replace(/-/g, '')}-${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}`
 }
 
+// ---------------- 配置文件 ----------------
+
+/** 配置文件路径：<DSH_HOME 或 ~/.dsh>/essay-desk.json（root 与 practice 共用一个文件） */
+function configFilePath() {
+  const dshHome = String(process.env.DSH_HOME || '').trim()
+  return join(dshHome || join(homedir(), '.dsh'), 'essay-desk.json')
+}
+
+/**
+ * 读配置对象。strict=false 时（读 root / 读练习配置）坏文件回落到默认值；
+ * strict=true 时（写配置）抛中文错误，避免把用户的其它字段写丢。
+ */
+function readConfigObject(strict = false) {
+  const file = configFilePath()
+  if (!existsSync(file)) return {}
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf8'))
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('配置文件内容不是对象')
+    return data
+  } catch (error) {
+    if (strict) throw new Error(`配置文件不是合法 JSON，无法保存练习设置：${file}`)
+    return {}
+  }
+}
+
+function normalizePracticeConfig(raw) {
+  const practice = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  const time =
+    typeof practice.time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(practice.time.trim())
+      ? practice.time.trim()
+      : DEFAULT_PRACTICE_TIME
+  return {
+    enabled: typeof practice.enabled === 'boolean' ? practice.enabled : true,
+    time,
+    keywords: typeof practice.keywords === 'string' ? practice.keywords.trim() : '',
+  }
+}
+
+/** 练习配置：缺省 enabled=true / time=09:00 / keywords=''；字段非法时回落默认值 */
+export function readPracticeConfig() {
+  return normalizePracticeConfig(readConfigObject(false).practice)
+}
+
+/** 只更新给定字段，保留 root 与其它未知字段（含 practice 下的未知子字段）；返回归一化后的配置 */
+export function writePracticeConfig(patch = {}) {
+  const updates = {}
+  if (patch.enabled !== undefined) {
+    if (typeof patch.enabled !== 'boolean') throw new Error('enabled 需要 true 或 false')
+    updates.enabled = patch.enabled
+  }
+  if (patch.time !== undefined) {
+    const time = String(patch.time).trim()
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('推送时间格式应为 HH:mm（例如 09:00）')
+    updates.time = time
+  }
+  if (patch.keywords !== undefined) {
+    if (typeof patch.keywords !== 'string') throw new Error('keywords 需要是字符串')
+    updates.keywords = patch.keywords.trim()
+  }
+
+  const file = configFilePath()
+  const settings = readConfigObject(true)
+  const base =
+    settings.practice && typeof settings.practice === 'object' && !Array.isArray(settings.practice)
+      ? settings.practice
+      : {}
+  const practice = { ...base, ...normalizePracticeConfig(base), ...updates }
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, `${JSON.stringify({ ...settings, practice }, null, 2)}\n`, 'utf8')
+  return normalizePracticeConfig(practice)
+}
+
 // ---------------- 根目录解析（CONTRACT §2） ----------------
 
 /**
@@ -76,19 +158,15 @@ export function resolveRoot() {
   const fromEnv = String(process.env.ESSAY_DESK_ROOT || '').trim()
   if (fromEnv && isAbsolute(fromEnv)) return resolve(fromEnv)
 
-  const dshHome = String(process.env.DSH_HOME || '').trim()
-  const home = dshHome || join(homedir(), '.dsh')
-  const configPath = join(home, 'essay-desk.json')
+  const configPath = configFilePath()
   try {
-    if (existsSync(configPath)) {
-      const settings = JSON.parse(readFileSync(configPath, 'utf8'))
-      const fromConfig = settings && typeof settings.root === 'string' ? settings.root.trim() : ''
-      if (fromConfig && isAbsolute(fromConfig)) return resolve(fromConfig)
-    }
+    const settings = readConfigObject(false)
+    const fromConfig = typeof settings.root === 'string' ? settings.root.trim() : ''
+    if (fromConfig && isAbsolute(fromConfig)) return resolve(fromConfig)
   } catch (error) {
     // 配置文件损坏不该让插件加载失败：回落到默认根目录，具体读写错误由各操作报出
   }
-  return resolve(join(home, DEFAULT_ROOT))
+  return resolve(join(dirname(configPath), DEFAULT_ROOT))
 }
 
 /**
@@ -99,6 +177,7 @@ export function ensureDirs(root = resolveRoot()) {
   mkdirSync(join(base, DRAFT_DIR), { recursive: true })
   mkdirSync(join(base, TOPIC_DIR), { recursive: true })
   mkdirSync(join(base, DRAFT_DIR, ARCHIVE_DIR), { recursive: true })
+  mkdirSync(join(base, PRACTICE_DIR, PRACTICE_TASK_DIR), { recursive: true })
   return base
 }
 
@@ -456,6 +535,829 @@ export function listState(root = resolveRoot()) {
   }
 }
 
+// ---------------- 写作练习：题目库 ----------------
+// 每道题都是完整命题：命题 / 剧本节拍（4–6 条）/ 演绎方向 / 约束 / 反馈标准。
+// types 可含多个题型；生成时按日期日序轮换题型（PRACTICE_TYPES），在匹配题目里挑选，
+// 并优先避开最近 3 期用过的 motif。
+const QUESTION_LIBRARY = [
+  {
+    id: 'q01',
+    type: '场景+冲突',
+    types: ['场景+冲突', '情绪'],
+    title: '末班地铁，捡到一张自己的照片',
+    motif: '误会与自证',
+    scene: '深夜的末班地铁车厢',
+    conflict: '在座位上捡到一张自己的照片',
+    emotion: '警觉 → 心虚 → 想解释清楚',
+    tags: ['旧照片', '末班车', '误会', '深夜'],
+    prompt: '深夜的末班地铁上，你捡到一张照片，照片里的人是你，可你完全不记得拍过它。',
+    beats: [
+      '末班车厢只剩三排乘客，你低头捡起脚边那张照片，画面里是你站在同样的车厢里。',
+      '对面的女人抬头看了你一眼又迅速移开视线，她的手机壳和照片背面的标记一模一样。',
+      '你攥着照片走过去，她先开口：「你终于来还了。」',
+      '她说照片是三天前你亲手交给她的，可你连三天前坐过这班车都不记得。',
+      '到站提示音响起，你必须决定：是下车去查监控，还是留下听完她的解释。',
+    ],
+    directions: {
+      view: '第一人称，贴着人物的心跳写，别急着解释设定',
+      tension: '照片是谁拍的、她为什么认识你',
+      ending: '让「自证」变成一次有代价的选择：留下道歉，或者带着照片离开',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（疑问 → 压力 → 必须表态）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「误会与自证」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q02',
+    type: '场景+冲突',
+    types: ['场景+冲突'],
+    title: '旧书店关门那天，我弄丢了朋友的托付',
+    motif: '承诺与违约',
+    scene: '挂牌转让的旧书店',
+    conflict: '替朋友保管的绝版书不见了',
+    emotion: '愧疚 → 辩解 → 承认',
+    tags: ['书店', '承诺', '友情', '旧书'],
+    prompt: '旧书店关门那天，你替朋友保管的绝版书不见了，而朋友明天就来取。',
+    beats: [
+      '书店里纸箱堆到天花板，老板催你最后清一次自己的寄存格。',
+      '你把格子翻了两遍，那本用牛皮纸包好的绝版书始终没有出现。',
+      '手机亮起，是朋友发来的消息：「我明天下午到，书还在吧？」',
+      '你想起上周有个常客盯着那本书看了很久，还问过「这本卖不卖」。',
+      '老板把卷帘门拉到一半，回头问你：「东西都拿齐了？我要锁门了。」',
+    ],
+    directions: {
+      view: '第一人称，把「找书」的过程写成倒计时',
+      tension: '是坦白书丢了，还是先编一个理由拖过明天',
+      ending: '让坦白或撒谎都要付出代价：失去信任，或者失去书店最后一点人情',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（疑问 → 压力 → 必须表态）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「承诺与违约」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q03',
+    type: '场景+冲突',
+    types: ['场景+冲突', '关系'],
+    title: '医院走廊，队伍里那个熟人',
+    motif: '规则与人情',
+    scene: '医院挂号走廊',
+    conflict: '熟人插队，你被夹在规则和人情中间',
+    emotion: '犹豫 → 偏袒 → 后悔',
+    tags: ['医院', '规则', '人情', '排队'],
+    prompt: '医院挂号队伍里，一个熟人径直插到你前面，还回头冲你笑了笑。',
+    beats: [
+      '走廊里全是消毒水味，队伍排到楼梯口，你已经站了四十分钟。',
+      '熟人从人群里挤过来，拍了下你的肩：「我赶时间，站你这儿了啊。」',
+      '身后的大爷开始嘟囔，前面的人回头看你，等你说话。',
+      '熟人压低声音：「就这一次，回头请你吃饭。」',
+      '窗口叫号声响起，队伍必须往前挪了。',
+    ],
+    directions: {
+      view: '第一人称，重点写「还没开口」那几秒的身体反应',
+      tension: '你帮熟人说话，还是把他请回队尾',
+      ending: '让选择的结果落在一个具体的人身上（大爷、熟人，或你自己）',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用旁白直接下道德结论。',
+    feedback: [
+      '冲突是否升级（犹豫 → 压力 → 必须表态）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「规则与人情」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q04',
+    type: '情绪',
+    types: ['情绪'],
+    title: '便利店凌晨两点，我对店员说了真话',
+    motif: '孤独与被看见',
+    scene: '凌晨两点的便利店',
+    conflict: '买饭团时对陌生店员说了不该说的真心话',
+    emotion: '疲惫 → 失守 → 羞赧',
+    tags: ['便利店', '孤独', '深夜', '真话'],
+    prompt: '凌晨两点的便利店，收银员随口问「今天还好吗」，你突然说了很多。',
+    beats: [
+      '微波炉在身后转，货架灯白得刺眼，你的饭团是今天第一顿热饭。',
+      '收银员扫完码，顺口问了句：「今天还好吗？」',
+      '你先说了「还行」，又鬼使神差补了一句：「其实不太好。」',
+      '他没催你，只是把加热好的饭团往前推了推，说：「慢慢说。」',
+      '后面又进来一个客人，你突然意识到自己已经讲了十分钟。',
+    ],
+    directions: {
+      view: '第一人称，允许叙述散一点，像深夜没整理过的念头',
+      tension: '说出口的真心话会不会被当成笑话',
+      ending: '用一个小动作收尾（递纸巾、找零、推门），别直接写「我释然了」',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择（说出口本身也算）；不要用「梦」收尾。',
+    feedback: [
+      '情绪是否有递进（疲惫 → 失守 → 羞赧）',
+      '真心话是否带来代价或风险',
+      '结尾是否回扣母题「孤独与被看见」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q05',
+    type: '情绪',
+    types: ['情绪'],
+    title: '雨里被踩了一脚，我还说了对不起',
+    motif: '愤怒与克制',
+    scene: '雨天的公交站',
+    conflict: '被陌生人踩了一脚还被骂，第一反应竟是道歉',
+    emotion: '愤怒 → 克制 → 自嘲',
+    tags: ['雨天', '公交站', '愤怒', '克制'],
+    prompt: '雨天公交站，有人踩了你一脚，骂完你才反应过来：刚才说对不起的是你自己。',
+    beats: [
+      '雨斜着下，站台上的人都缩着肩，你的鞋全湿了。',
+      '一个男人挤过来踩在你脚背上，回头先骂：「站这儿挡什么道？」',
+      '你下意识说了句「不好意思」，说完才觉得不对。',
+      '他还在嘟囔，你攥紧伞柄，指节发白，公交车的灯从雨里靠近。',
+      '上车只有几秒，你要么挤上去，要么站在原地把话说完。',
+    ],
+    directions: {
+      view: '第一人称，把愤怒写成身体反应（耳鸣、发烫、攥紧）而不是形容词',
+      tension: '爆发还是咽回去，两种都难受',
+      ending: '让「克制」有代价：要么自己消化，要么错过车',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要写成长篇说教。',
+    feedback: [
+      '情绪是否有递进（愤怒 → 克制 → 自嘲）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「愤怒与克制」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q06',
+    type: '情绪',
+    types: ['情绪', '场景'],
+    title: '搬家前夜，那件早该丢掉的东西',
+    motif: '怀旧与告别',
+    scene: '搬空一半的旧房间',
+    conflict: '整理时翻出一件早该丢掉的东西',
+    emotion: '怀念 → 犹豫 → 释然',
+    tags: ['搬家', '旧物', '告别', '房间'],
+    prompt: '搬家前一夜，你在空了一半的房间角落里翻出一件早该丢掉的东西。',
+    beats: [
+      '墙上留着没撕干净的胶带印，地上是打包到一半的纸箱。',
+      '你伸手到床底，摸出一个落满灰的铁盒。',
+      '盒子里是几封信、一张车票，和一件你以为早就扔了的东西。',
+      '房东在门外问：「明早八点车来，你东西都收好了吧？」',
+      '你坐在纸箱上，手里那件东西该进垃圾袋，还是进随身包。',
+    ],
+    directions: {
+      view: '第一人称，用物件带出回忆，别写成回忆录',
+      tension: '留下还是丢掉，都会失去一部分',
+      ending: '让「告别」落在一个具体动作上（封箱、扔下、放进外套口袋）',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '情绪是否有递进（怀念 → 犹豫 → 释然）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「怀旧与告别」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q07',
+    type: '关系',
+    types: ['关系'],
+    title: '合租第三个月，我终于开口',
+    motif: '亲密与边界',
+    scene: '合租屋的厨房',
+    conflict: '室友长期不打招呼用你的东西',
+    emotion: '隐忍 → 试探 → 摊牌',
+    tags: ['合租', '边界', '室友', '厨房'],
+    prompt: '合租第三个月，你又一次在厨房看见自己的锅被人用过没洗，这次室友正站在旁边。',
+    beats: [
+      '水槽里泡着你的锅，锅底还沾着昨天的油。',
+      '室友端着杯子进门，看见你，笑了笑：「哦，那个我等下洗。」',
+      '这已经是这个月第四次，你想起自己上次也是这么被一句话堵回去的。',
+      '他转身要走，你听见自己开口：「等一下。」',
+      '他回过头，表情有点意外，厨房里只剩下冰箱的嗡嗡声。',
+    ],
+    directions: {
+      view: '第一人称，把「边界」写成一次次被磨掉的细节，而不是一次争吵',
+      tension: '说重了怕伤和气，说轻了等于没说',
+      ending: '让摊牌的结果不完美：对方道歉但没改，或者你们真的吵了一架',
+    },
+    constraints: '600–1500 字；第一人称；对话至少占三分之一；不要用「断绝关系」草草收尾。',
+    feedback: [
+      '冲突是否升级（隐忍 → 试探 → 摊牌）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「亲密与边界」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q08',
+    type: '关系',
+    types: ['关系', '情绪'],
+    title: '父亲在电话里说，回来考个编吧',
+    motif: '理解与代沟',
+    scene: '深夜的出租屋',
+    conflict: '父亲劝你辞职回家考编，你第一次听出他声音里的老',
+    emotion: '抵触 → 听见 → 沉默',
+    tags: ['父亲', '电话', '代沟', '家人'],
+    prompt: '深夜的电话里，父亲第三次说「回来考个编吧」，这一次他的声音有点哑。',
+    beats: [
+      '你刚加完班，出租屋的灯只开了一盏。',
+      '父亲在电话那头咳了两声，说：「你妈让我问，今年还是没打算回来？」',
+      '你熟练地说了那套理由：城市、机会、再等等。',
+      '他沉默了一会儿，忽然说：「我最近耳朵不太好使了。」',
+      '你握着手机，听见他那边电视机的声音，忽然不知道该接哪句。',
+    ],
+    directions: {
+      view: '第一人称，重点写「听见他老了」的那个瞬间',
+      tension: '坚持自己的人生，还是被这句话拽回去',
+      ending: '让沉默本身成为选择，别急着给出答案',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要写成两代人对错的辩论。',
+    feedback: [
+      '冲突是否升级（抵触 → 听见 → 沉默）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「理解与代沟」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q09',
+    type: '关系',
+    types: ['关系', '场景'],
+    title: '同学婚礼上，十年没见的同桌',
+    motif: '错过与重逢',
+    scene: '同学婚礼的敬酒桌',
+    conflict: '遇见十年没联系却曾无话不谈的旧同桌',
+    emotion: '惊讶 → 客套 → 遗憾',
+    tags: ['婚礼', '同学', '重逢', '遗憾'],
+    prompt: '同学婚礼的敬酒桌上，你被安排坐在十年没见的旧同桌旁边。',
+    beats: [
+      '婚礼现场的灯光很亮，你被司仪喊到名字时正低头看手机。',
+      '坐下的瞬间你认出了他，他也认出你，两个人同时说「好久不见」。',
+      '寒暄从工作问到城市，问到「还跟以前那谁联系吗」。',
+      '他笑着说了句「那时候真傻」，你发现这句话你练过很多年。',
+      '新人开始敬酒，音乐声变大，你们中间那句最该说的话还悬着。',
+    ],
+    directions: {
+      view: '第一人称，用婚礼的热闹反衬两个人的客套',
+      tension: '要不要提起当年那件没说清的事',
+      ending: '让「错过」保持未完成：一句没说完的话，比和解更有余味',
+    },
+    constraints: '600–1500 字；第一人称；对话要自然，别写成回忆清单；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（惊讶 → 客套 → 遗憾）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「错过与重逢」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q10',
+    type: '场景',
+    types: ['场景', '情绪'],
+    title: '菜市场多找的五十块',
+    motif: '陌生人的善意',
+    scene: '清晨的菜市场',
+    conflict: '摊主多找了五十块钱，你走出一段才发觉',
+    emotion: '贪念 → 动摇 → 归还',
+    tags: ['菜市场', '零钱', '善意', '清晨'],
+    prompt: '清晨的菜市场，摊主一边打哈欠一边找你零钱，走出十几米你才发现多了五十块。',
+    beats: [
+      '市场刚开，地上还是湿的，摊主正在揉眼睛。',
+      '你买了两把青菜，他数零钱时手有点抖。',
+      '走到卖鱼的摊子前，你才发觉手里的钱不对，多了五十。',
+      '回头能看见他还在原地，正给下一个人称菜。',
+      '五十块不多，但对你和他都不算少；你站在原地，脚已经往回转了半步。',
+    ],
+    directions: {
+      view: '第一人称，让「五十块」一直很具体，别升华成道德命题',
+      tension: '还回去会不会显得刻意，不还又过不去',
+      ending: '把归还或留下的后果写实：一句谢谢，或者一整天的别扭',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（贪念 → 动摇 → 归还）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「陌生人的善意」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q11',
+    type: '场景',
+    types: ['场景'],
+    title: '老电影院拆迁前，我听见一段放映声',
+    motif: '声音与记忆',
+    scene: '拆到一半的老电影院',
+    conflict: '废墟里响起一段熟悉的放映机声',
+    emotion: '恍惚 → 追索 → 放下',
+    tags: ['电影院', '声音', '记忆', '拆迁'],
+    prompt: '老电影院拆到一半，你站在围挡外，听见里面传来放映机转动的咔哒声。',
+    beats: [
+      '围挡上贴着「施工重地」，铁皮被风吹得咣咣响。',
+      '你本来是路过，听见咔哒咔哒的声音，脚步就停了。',
+      '透过缝隙能看见半面银幕，幕布垂着，像一块旧床单。',
+      '声音停了一下，又响起来，像是有人还在放同一部片子。',
+      '保安从远处走过来，问你要不要离开，你说再站一会儿。',
+    ],
+    directions: {
+      view: '第一人称，用声音和光斑带出记忆，别直接交代回忆',
+      tension: '声音是错觉，还是有人和你一样舍不得',
+      ending: '让「放下」发生在一个很小的动作里：转身、点烟、跟保安道谢',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（恍惚 → 追索 → 放下）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「声音与记忆」',
+      '哪句解释可以删',
+    ],
+  },
+  {
+    id: 'q12',
+    type: '场景',
+    types: ['场景', '关系'],
+    title: '机场到达层，我在等一个不确定会来的人',
+    motif: '等待与错过',
+    scene: '机场到达层的咖啡座',
+    conflict: '接一个只发了「可能来」三个字的人',
+    emotion: '期待 → 焦躁 → 平静',
+    tags: ['机场', '等待', '航班', '咖啡'],
+    prompt: '机场到达层的咖啡座，你要等的人只发来三个字：「可能来」。',
+    beats: [
+      '到达层的航班牌一块块翻，你已经喝完第二杯咖啡。',
+      '手机屏幕停在三个字上：「可能来」。发出时间是下午两点。',
+      '每批旅客出来，你都下意识站起来，又坐回去。',
+      '广播开始播报晚点，你算着最后一班地铁的时间。',
+      '出口又涌出一批人，你这次没有站起来。',
+    ],
+    directions: {
+      view: '第一人称，用等待的动作和机场的广播节奏控制叙事',
+      tension: '她会不会来，以及你还能等多久',
+      ending: '让「平静」不是释怀，而是承认结果：走，或者继续坐一会儿',
+    },
+    constraints: '600–1500 字；第一人称；至少一次有代价的选择；不要用「梦」收尾。',
+    feedback: [
+      '冲突是否升级（期待 → 焦躁 → 平静）',
+      '关键选择是否有代价',
+      '结尾是否回扣母题「等待与错过」',
+      '哪句解释可以删',
+    ],
+  },
+]
+
+// ---------------- 写作练习：任务文件 ----------------
+
+function normalizeDate(value) {
+  const text = String(value ?? '').trim()
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  if (!match) throw new Error('日期格式应为 YYYY-MM-DD')
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const probe = new Date(year, month - 1, day)
+  if (probe.getFullYear() !== year || probe.getMonth() !== month - 1 || probe.getDate() !== day) {
+    throw new Error(`日期不存在：${text}`)
+  }
+  return text
+}
+
+function normalizeTaskId(value) {
+  const id = String(value ?? '').trim()
+  if (!/^\d{8}$/.test(id)) throw new Error('练习任务 id 需要 8 位日期（YYYYMMDD）')
+  normalizeDate(`${id.slice(0, 4)}-${id.slice(4, 6)}-${id.slice(6, 8)}`)
+  return id
+}
+
+function practiceTaskFile(root, id) {
+  return assertInside(root, join(resolve(root), PRACTICE_DIR, PRACTICE_TASK_DIR, `${normalizeTaskId(id)}.md`))
+}
+
+function practicePointsFile(root) {
+  return join(resolve(root), PRACTICE_DIR, PRACTICE_POINTS_FILE)
+}
+
+function dayNumber(dateText) {
+  const [year, month, day] = dateText.split('-').map(Number)
+  return Math.floor(Date.UTC(year, month - 1, day) / 86400000)
+}
+
+/** 解析练习任务文件：front matter（简单 key: value）+ `## 节名` 分节 */
+function parsePracticeFile(raw) {
+  const lines = String(raw).split(/\r?\n/)
+  const front = {}
+  let bodyStart = 0
+  if (lines[0] === '---') {
+    let end = -1
+    for (let i = 1; i < lines.length; i += 1) {
+      if (lines[i] === '---') {
+        end = i
+        break
+      }
+    }
+    if (end < 0) throw new Error('练习任务文件格式不正确：front matter 没有结束标记')
+    for (let i = 1; i < end; i += 1) {
+      const colon = lines[i].indexOf(':')
+      if (colon <= 0) continue
+      front[lines[i].slice(0, colon).trim()] = lines[i].slice(colon + 1).trim()
+    }
+    bodyStart = end + 1
+  }
+  const sections = {}
+  let current = null
+  let buffer = []
+  const flush = () => {
+    if (current === null) return
+    sections[current] = buffer.join('\n').trim()
+    buffer = []
+  }
+  for (let i = bodyStart; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.startsWith('## ')) {
+      flush()
+      current = line.slice(3).trim()
+      continue
+    }
+    if (current !== null) buffer.push(line)
+  }
+  flush()
+  return { front, sections }
+}
+
+/** 生成任务文件：front matter + 期号标题 + 固定顺序的八个节 */
+function renderPracticeFile({ front, issue, sections }) {
+  const lines = [
+    '---',
+    `id: ${front.id}`,
+    `date: ${front.date}`,
+    `title: ${front.title}`,
+    `type: ${front.type}`,
+    `motif: ${front.motif}`,
+    `keywords:${front.keywords ? ` ${front.keywords}` : ''}`,
+    `status: ${front.status}`,
+    `points: ${front.points}`,
+    `created: ${front.created}`,
+    '---',
+    '',
+    `# 第 ${pad2(issue)} 期 · ${front.title}`,
+  ]
+  for (const [name, value] of sections) {
+    lines.push('', `## ${name}`, '')
+    if (value) lines.push(...String(value).split('\n'))
+  }
+  return `${lines.join('\n')}\n`
+}
+
+/** 只改 front matter 里给定的字段（保住其余行和正文） */
+function updatePracticeFrontMatter(raw, updates) {
+  const lines = String(raw).split(/\r?\n/)
+  if (lines[0] !== '---') throw new Error('练习任务文件格式不正确：缺少 front matter')
+  let end = -1
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i] === '---') {
+      end = i
+      break
+    }
+  }
+  if (end < 0) throw new Error('练习任务文件格式不正确：front matter 没有结束标记')
+  for (let i = 1; i < end; i += 1) {
+    const colon = lines[i].indexOf(':')
+    if (colon <= 0) continue
+    const key = lines[i].slice(0, colon).trim()
+    if (Object.prototype.hasOwnProperty.call(updates, key)) lines[i] = `${key}: ${updates[key]}`
+  }
+  return lines.join('\n')
+}
+
+/** 只替换某一节的内容，其余节原样保留 */
+function replacePracticeSection(raw, name, value) {
+  const text = String(raw)
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex((line) => line === `## ${name}`)
+  if (start < 0) throw new Error(`练习任务文件缺少「${name}」一节`)
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (lines[i].startsWith('## ')) {
+      end = i
+      break
+    }
+  }
+  const head = lines.slice(0, start + 1)
+  const tail = lines.slice(end)
+  while (head.length > start + 1 && head[head.length - 1] === '') head.pop()
+  while (tail.length && tail[0] === '') tail.shift()
+  const body = String(value ?? '').trim()
+  const middle = body ? ['', ...body.split(/\r?\n/), ''] : ['']
+  return [...head, ...middle, ...tail].join(eol)
+}
+
+// ---------------- 写作练习：积分 ----------------
+
+function readPracticePoints(root) {
+  const file = practicePointsFile(root)
+  if (!existsSync(file)) return { version: 1, total: 0, history: [] }
+  let data
+  try {
+    data = JSON.parse(readFileSync(file, 'utf8'))
+  } catch (error) {
+    throw new Error(`积分文件不是合法 JSON：${file}`)
+  }
+  const history = Array.isArray(data && data.history) ? data.history.filter((entry) => entry && typeof entry === 'object') : []
+  const total = Number.isFinite(data && data.total) ? data.total : history.reduce((sum, entry) => sum + (Number(entry.points) || 0), 0)
+  return { version: 1, total, history }
+}
+
+function writePracticePoints(root, data) {
+  const file = practicePointsFile(root)
+  mkdirSync(dirname(file), { recursive: true })
+  const payload = { version: 1, total: Number(data.total) || 0, history: Array.isArray(data.history) ? data.history : [] }
+  writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
+}
+
+// ---------------- 写作练习：选题目与生成 ----------------
+
+function parseKeywords(value) {
+  const text = Array.isArray(value) ? value.join(',') : String(value ?? '')
+  const list = text
+    .split(/[,，、;；\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return [...new Set(list)].slice(0, 12)
+}
+
+function keywordHits(question, keywordList) {
+  return keywordList.some((keyword) => question.tags.some((tag) => tag.includes(keyword) || keyword.includes(tag)))
+}
+
+/**
+ * 选题目：题型按日序轮换；优先最近 3 期未用 motif；
+ * 关键词命中 tags 优先（先当日题型、再全库）；全用过时复用最久未用的一题。
+ */
+function pickQuestion({ day, tasks, keywordList }) {
+  const targetType = PRACTICE_TYPES[dayNumber(day) % PRACTICE_TYPES.length]
+  const recentMotifs = new Set(tasks.slice(-3).map((task) => task.motif).filter(Boolean))
+  const lastUsed = new Map()
+  tasks.forEach((task, index) => {
+    const question = QUESTION_LIBRARY.find((item) => item.title === task.title)
+    if (question) lastUsed.set(question.id, index)
+  })
+  const fresh = (pool) => pool.filter((question) => !recentMotifs.has(question.motif))
+  const typePool = QUESTION_LIBRARY.filter((question) => question.types.includes(targetType))
+  const freshTypePool = fresh(typePool)
+  const freshAll = fresh(QUESTION_LIBRARY)
+
+  if (keywordList.length) {
+    const hitInType = freshTypePool.filter((question) => keywordHits(question, keywordList))
+    if (hitInType.length) return hitInType[dayNumber(day) % hitInType.length]
+    const hitInAll = freshAll.filter((question) => keywordHits(question, keywordList))
+    if (hitInAll.length) return hitInAll[dayNumber(day) % hitInAll.length]
+    const randomPool = freshTypePool.length ? freshTypePool : freshAll
+    if (randomPool.length) return randomPool[Math.floor(Math.random() * randomPool.length)]
+    // 全部用过 → 落到下面的「复用最久未用」
+  }
+
+  if (freshTypePool.length) {
+    return freshTypePool[Math.floor(dayNumber(day) / PRACTICE_TYPES.length) % freshTypePool.length]
+  }
+  if (freshAll.length) return freshAll[dayNumber(day) % freshAll.length]
+
+  const lruPool = typePool.length ? typePool : QUESTION_LIBRARY
+  let best = lruPool[0]
+  let bestIndex = lastUsed.has(best.id) ? lastUsed.get(best.id) : Number.POSITIVE_INFINITY
+  for (const question of lruPool.slice(1)) {
+    const index = lastUsed.has(question.id) ? lastUsed.get(question.id) : Number.POSITIVE_INFINITY
+    if (index < bestIndex) {
+      best = question
+      bestIndex = index
+    }
+  }
+  return best
+}
+
+function promptWithKeywords(question, keywordList) {
+  if (!keywordList.length) return question.prompt
+  const quoted = keywordList.map((keyword) => `「${keyword}」`).join('、')
+  return `${question.prompt}\n\n本期关键词：${quoted}。试着让它们在故事里自然出现，而不是硬塞进对话。`
+}
+
+/**
+ * 生成某天的练习任务；文件已存在时直接返回（每天只生成一次）。
+ * 篇号 = 已有任务数 + 1；题型按 date 的日序轮换。
+ */
+export function generatePracticeTask(root = resolveRoot(), { date, keywords } = {}) {
+  const base = ensureDirs(root)
+  const day = date === undefined || date === null || date === '' ? formatDate(new Date()) : normalizeDate(date)
+  const id = day.replace(/-/g, '')
+  const file = practiceTaskFile(base, id)
+  if (existsSync(file)) return readPracticeTask(base, id)
+
+  const config = readPracticeConfig()
+  const keywordList = parseKeywords(keywords === undefined ? config.keywords : keywords)
+  const tasks = listPracticeTasks(base)
+  const question = pickQuestion({ day, tasks, keywordList })
+  const sections = [
+    ['命题', promptWithKeywords(question, keywordList)],
+    ['剧本节拍', question.beats.map((beat, index) => `${index + 1}. ${beat}`).join('\n')],
+    [
+      '演绎方向',
+      `- 视角：${question.directions.view}\n- 可放大的矛盾：${question.directions.tension}\n- 结尾尝试：${question.directions.ending}`,
+    ],
+    ['约束', question.constraints],
+    ['反馈标准', question.feedback.map((item, index) => `${index + 1}. ${item}`).join('\n')],
+    ['我的演绎', ''],
+    ['评语', ''],
+    ['积分', '+0（评分后填写）'],
+  ]
+  const raw = renderPracticeFile({
+    front: {
+      id,
+      date: day,
+      title: question.title,
+      type: PRACTICE_TYPES[dayNumber(day) % PRACTICE_TYPES.length],
+      motif: question.motif,
+      keywords: keywordList.join(', '),
+      status: 'pending',
+      points: 0,
+      created: localIso(new Date()),
+    },
+    issue: tasks.length + 1,
+    sections,
+  })
+  writeFileSync(file, raw, 'utf8')
+  return readPracticeTask(base, id)
+}
+
+// ---------------- 写作练习：读取 / 保存 / 提交 / 评分 ----------------
+
+/** 任务列表，按 id（日期）升序；目录不存在视为空 */
+export function listPracticeTasks(root = resolveRoot()) {
+  const base = resolve(root)
+  const dir = join(base, PRACTICE_DIR, PRACTICE_TASK_DIR)
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return []
+    throw error
+  }
+  const tasks = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^\d{8}\.md$/.test(entry.name)) continue
+    try {
+      tasks.push(readPracticeTask(base, entry.name.slice(0, -3)))
+    } catch (error) {
+      if (error && error.code === 'ENOENT') continue
+      throw error
+    }
+  }
+  tasks.sort((a, b) => a.id.localeCompare(b.id))
+  return tasks
+}
+
+/** 读一个练习任务：front matter + 五个只读节 + 我的演绎 + 评语 + 积分 + 原文 */
+export function readPracticeTask(root, id) {
+  const taskId = normalizeTaskId(id)
+  const file = practiceTaskFile(root, taskId)
+  if (!existsSync(file)) throw new Error(`练习任务不存在：${taskId}`)
+  const raw = readFileSync(file, 'utf8')
+  const { front, sections } = parsePracticeFile(raw)
+  const draft = (sections['我的演绎'] || '').trim()
+  const review = (sections['评语'] || '').trim()
+  return {
+    ...front,
+    status: front.status || 'pending',
+    points: Number(front.points) || 0,
+    sections: {
+      命题: sections['命题'] || '',
+      剧本节拍: sections['剧本节拍'] || '',
+      演绎方向: sections['演绎方向'] || '',
+      约束: sections['约束'] || '',
+      反馈标准: sections['反馈标准'] || '',
+    },
+    draft,
+    review,
+    chars: draft.length,
+    raw,
+  }
+}
+
+/** 保存草稿：只改「我的演绎」并置 written（pending → written；已提交的保持 submitted 不降级） */
+export function savePracticeDraft(root, { id, text } = {}) {
+  const base = resolve(root)
+  const task = readPracticeTask(base, id)
+  if (task.status === 'scored') throw new Error('任务已评分，不能再修改草稿')
+  const body = String(text ?? '').trim()
+  const status = task.status === 'submitted' ? 'submitted' : 'written'
+  let raw = replacePracticeSection(task.raw, '我的演绎', body)
+  raw = updatePracticeFrontMatter(raw, { status })
+  writeFileSync(practiceTaskFile(base, task.id), raw, 'utf8')
+  return { id: task.id, status }
+}
+
+/** 提交：校验草稿非空，置 submitted（已提交时幂等） */
+export function submitPracticeTask(root, { id } = {}) {
+  const base = resolve(root)
+  const task = readPracticeTask(base, id)
+  if (task.status === 'scored') throw new Error('任务已评分，不需要再次提交')
+  if (task.status === 'submitted') return { id: task.id, status: 'submitted' }
+  if (!task.draft) throw new Error('还没有写内容，不能提交')
+  const raw = updatePracticeFrontMatter(task.raw, { status: 'submitted' })
+  writeFileSync(practiceTaskFile(base, task.id), raw, 'utf8')
+  return { id: task.id, status: 'submitted' }
+}
+
+function normalizePoints(value) {
+  const score = Number(value)
+  if (!Number.isInteger(score) || score < 10 || score > 20) {
+    throw new Error('points 需要 10–20 的整数（基础 10 分 + 0–10 加分）')
+  }
+  return score
+}
+
+function reviewReason(review) {
+  const line =
+    String(review)
+      .split(/\r?\n/)
+      .map((item) => item.replace(/^[-*#>\d.、)\s]+/, '').trim())
+      .find(Boolean) || '写作练习评分'
+  return line.slice(0, 100)
+}
+
+/** 评分：校验状态（written/submitted）、评语与积分 → 写评语/积分/状态 → 追加积分历史 */
+export function scorePracticeTask(root, { id, points, review } = {}) {
+  const base = resolve(root)
+  const task = readPracticeTask(base, id)
+  if (task.status === 'scored') throw new Error('任务已经评过分了')
+  if (task.status !== 'submitted' && task.status !== 'written') throw new Error('任务还没有写作内容，不能评分')
+  const score = normalizePoints(points)
+  const reviewText = String(review ?? '').trim()
+  if (!reviewText) throw new Error('评语不能为空')
+
+  // 先读积分文件：损坏时不该先把任务改成 scored
+  const pointsData = readPracticePoints(base)
+  pointsData.history.push({
+    at: localIso(new Date()),
+    taskId: task.id,
+    points: score,
+    reason: reviewReason(reviewText),
+  })
+  pointsData.total = pointsData.history.reduce((sum, entry) => sum + (Number(entry.points) || 0), 0)
+
+  let raw = replacePracticeSection(task.raw, '评语', reviewText)
+  raw = replacePracticeSection(raw, '积分', `+${score}`)
+  raw = updatePracticeFrontMatter(raw, { points: score, status: 'scored' })
+  writeFileSync(practiceTaskFile(base, task.id), raw, 'utf8')
+  writePracticePoints(base, pointsData)
+  return { id: task.id, points: score, total: pointsData.total, task: readPracticeTask(base, task.id) }
+}
+
+/** 练习面板状态：配置 + 任务摘要（日期倒序）+ 累计积分 + 今天日期 */
+export function practiceState(root = resolveRoot()) {
+  const config = readPracticeConfig()
+  const tasks = listPracticeTasks(root)
+    .map((task) => ({
+      id: task.id,
+      date: task.date,
+      title: task.title,
+      type: task.type,
+      motif: task.motif,
+      status: task.status,
+      points: task.points,
+      chars: task.chars,
+    }))
+    .sort((a, b) => b.id.localeCompare(a.id))
+  const points = readPracticePoints(root)
+  return { config, tasks, points: { total: points.total, history: points.history }, today: formatDate(new Date()) }
+}
+
+/**
+ * 定时检查：enabled 且当前时间 ≥ 推送时间且当天任务不存在 → 生成当天任务
+ * （启动晚于推送时间时也能补生成）。任何失败都吞掉，留给下一次 tick。
+ */
+function checkPractice(now = new Date()) {
+  try {
+    const config = readPracticeConfig()
+    if (!config.enabled) return null
+    const root = resolveRoot()
+    const today = formatDate(now)
+    if (existsSync(practiceTaskFile(root, today.replace(/-/g, '')))) return null
+    const [hour, minute] = config.time.split(':').map(Number)
+    if (now.getHours() * 60 + now.getMinutes() < hour * 60 + minute) return null
+    return generatePracticeTask(root, { date: today, keywords: config.keywords })
+  } catch (error) {
+    return null
+  }
+}
+
 // ---------------- HTTP API（CONTRACT §3.2） ----------------
 
 /** 只允许回环：socket 地址与 Host 头解析出的 hostname 都必须属于本机 */
@@ -552,6 +1454,28 @@ async function runOp(root, request) {
       return opClassify(root, request)
     case 'note':
       return opNote(root, request)
+    case 'practice.state':
+      return { ok: true, ...practiceState(root) }
+    case 'practice.read':
+      return { ok: true, task: readPracticeTask(root, request.id) }
+    case 'practice.save': {
+      const result = savePracticeDraft(root, { id: request.id, text: request.text })
+      return { ok: true, status: result.status }
+    }
+    case 'practice.submit': {
+      const result = submitPracticeTask(root, { id: request.id })
+      return { ok: true, status: result.status }
+    }
+    case 'practice.config': {
+      const patch = {}
+      if (request.enabled !== undefined) patch.enabled = request.enabled
+      if (request.time !== undefined) patch.time = request.time
+      if (request.keywords !== undefined) patch.keywords = request.keywords
+      const config = Object.keys(patch).length ? writePracticeConfig(patch) : readPracticeConfig()
+      return { ok: true, config }
+    }
+    case 'practice.generate':
+      return { ok: true, task: generatePracticeTask(root, { date: request.date }) }
     default:
       throw new Error(`未知操作：${request.op ? String(request.op) : '(空)'}`)
   }
@@ -761,6 +1685,121 @@ function toolNote(root, params) {
   return { text: `已追加到 ${NOTES_FILE}（${result.date}）`, data: result }
 }
 
+// ---------------- Agent 工具 practice（写作练习） ----------------
+
+const PRACTICE_TOOL_DESCRIPTION =
+  '管理用户的写作练习（随笔工坊）。action=list 列出练习任务与累计积分；read 读某天任务全文（题目、我的演绎、评语）；' +
+  'score 按任务里的「反馈标准」写评语并发积分；generate 生成/补生成某天的练习任务；config 读取当前练习配置。'
+
+const PRACTICE_TOOL_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    action: { type: 'string', enum: ['list', 'read', 'score', 'generate', 'config'] },
+    id: { type: 'string', description: '练习任务 id（YYYYMMDD，即任务文件名）' },
+    points: { type: 'integer', description: '最终积分：基础 10 分 + 0–10 加分，范围 10–20' },
+    review: { type: 'string', description: '评语：按任务「反馈标准」的 4 条逐条点评，最后给一句总体反馈' },
+    date: { type: 'string', description: '生成日期 YYYY-MM-DD，默认今天' },
+  },
+  required: ['action'],
+}
+
+function createPracticeTool() {
+  return {
+    name: 'practice',
+    description: PRACTICE_TOOL_DESCRIPTION,
+    parameters: PRACTICE_TOOL_SCHEMA,
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string' },
+          data: { type: 'object', additionalProperties: true },
+        },
+        required: ['text'],
+      },
+      render(args, value) {
+        const text = value && typeof value.text === 'string' ? value.text : JSON.stringify(value, null, 2)
+        return [{ type: 'text', text }]
+      },
+    },
+    async execute(args) {
+      const params = args && typeof args === 'object' ? args : {}
+      const action = String(params.action || '')
+      const root = resolveRoot()
+      switch (action) {
+        case 'list':
+          return toolPracticeList(root)
+        case 'read':
+          return toolPracticeRead(root, params)
+        case 'score':
+          return toolPracticeScore(root, params)
+        case 'generate':
+          return toolPracticeGenerate(root, params)
+        case 'config':
+          return toolPracticeConfig()
+        default:
+          throw new Error(`未知 action：${action || '(空)'}（可用 list/read/score/generate/config）`)
+      }
+    },
+  }
+}
+
+function practiceStatusLabel(status) {
+  return PRACTICE_STATUS_LABELS[status] || status
+}
+
+function toolPracticeList(root) {
+  const state = practiceState(root)
+  const lines = [`写作练习（今日 ${state.today}）`, `累计积分：${state.points.total}`]
+  lines.push(`练习任务（${state.tasks.length} 个）：`)
+  if (state.tasks.length === 0) lines.push('（暂无）')
+  for (const task of state.tasks) {
+    lines.push(`- ${task.id} | ${practiceStatusLabel(task.status)} | ${task.points} 分 | ${task.title}`)
+  }
+  const pending = state.tasks.filter((task) => task.status === 'submitted').length
+  if (pending) lines.push(`待评分：${pending} 个（status=submitted）`)
+  lines.push('', '提示：用户说「练习写完了 / 帮我评分」时，先 read 任务，再按「反馈标准」逐条写评语并 score。')
+  return { text: lines.join('\n'), data: state }
+}
+
+function toolPracticeRead(root, params) {
+  if (!params.id) throw new Error('read 需要练习任务 id（YYYYMMDD）')
+  const task = readPracticeTask(root, params.id)
+  return { text: task.raw, data: task }
+}
+
+function toolPracticeScore(root, params) {
+  if (!params.id) throw new Error('score 需要练习任务 id（YYYYMMDD）')
+  if (params.review === undefined || params.review === null || String(params.review).trim() === '') {
+    throw new Error('score 需要评语 review')
+  }
+  if (params.points === undefined || params.points === null) throw new Error('score 需要积分 points（10–20 的整数）')
+  const result = scorePracticeTask(root, { id: params.id, points: params.points, review: params.review })
+  return {
+    text: `已评分：${result.id} · ${result.points} 分（累计 ${result.total} 分）\n\n${result.task.review}`,
+    data: result,
+  }
+}
+
+function toolPracticeGenerate(root, params) {
+  const task = generatePracticeTask(root, { date: params.date })
+  return {
+    text: `已生成练习任务：${task.id} · ${task.title}（${practiceStatusLabel(task.status)}）`,
+    data: task,
+  }
+}
+
+function toolPracticeConfig() {
+  const config = readPracticeConfig()
+  const lines = [
+    `写作练习：${config.enabled ? '已开启' : '已关闭'}`,
+    `推送时间：${config.time}`,
+    `关键词：${config.keywords || '（未设置）'}`,
+  ]
+  return { text: lines.join('\n'), data: config }
+}
+
 function errorMessage(error) {
   const message = error && typeof error.message === 'string' ? error.message.trim() : ''
   return message || '未知错误'
@@ -781,6 +1820,11 @@ function systemPromptText() {
     '- 用户说「总结思想变化/梳理思想」时：通读全部草稿与主题，用 essay(action=note) 把阶段性总结（分点、引用具体篇目）追加到思想脉络.md，同时在对话里给出你的观察。',
     '- 用户想写作或继续写作时：引导他们用侧栏「随笔」面板；也可以直接把用户口述内容用 essay(action=write) 落成草稿。',
     '- 永远不要手工移动/删除随笔文件，统一走 essay 工具，保证格式一致。',
+    '',
+    '写作练习：',
+    '- 练习任务在 练习/任务/<YYYYMMDD>.md（每天到配置的推送时间自动生成），累计积分在 练习/积分.json。',
+    '- 用户说「练习写完了 / 帮我评分」时：先 practice(action=list) 找出 status=submitted 的任务，practice(action=read, id) 通读题目与「我的演绎」，再严格按该任务「反馈标准」的 4 条逐条写评语，然后调用 practice(action=score, id, points, review)。points 传最终积分（基础 10 分 + 0–10 加分，范围 10–20）；review 逐条点评并在最后给一句总体反馈。评分后告诉用户本次得分、当前累计积分，再给一句话反馈。',
+    '- 用户想看练习配置时用 practice(action=config)；要改关键词 / 推送时间 / 开关，引导用户用面板的「练习设置」。',
   ].join('\n')
 }
 
@@ -794,7 +1838,13 @@ export function apply(ctx, config = {}) {
     // 目录建不出来不该阻塞插件加载：API / 工具会各自返回清晰的中文错误
   }
 
+  // 启动时先补查一次：插件晚于推送时间启动时也能生成当天任务
+  checkPractice()
+
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: API_PATH, handler: handleApi }))
   ctx.effect(() => ctx.tools.register(createEssayTool()))
+  ctx.effect(() => ctx.tools.register(createPracticeTool()))
   ctx.effect(() => ctx.systemPrompt.section({ name: 'essay-desk', order: 3500, text: systemPromptText }))
+  // 每分钟检查一次是否到了推送时间（每天以任务文件存在与否去重）
+  ctx.effect(() => ctx.timer.interval(checkPractice, PRACTICE_CHECK_INTERVAL))
 }
