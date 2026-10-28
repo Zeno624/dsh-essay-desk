@@ -1,0 +1,35 @@
+{
+  "name": "dsh-essay-desk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "随笔工坊：在 Harness Web GUI 里写随笔，按主题归档成 Markdown，并沉淀思想脉络 · Essay desk: write essays in the Harness Web UI, organize them into topic Markdown files, and keep a record of how your thinking evolves.",
+  "icon": "icon.svg",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# dependencies / artifacts
+node_modules/
+*.log
+.env
+.env.*
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# internal design notes (not part of the published plugin)
+CONTRACT.md
